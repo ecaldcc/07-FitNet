@@ -210,6 +210,10 @@ export function CameraView() {
       if (streamRef.current) {
         stopCamera(streamRef.current);
         streamRef.current = null;
+        // Limpiar srcObject para que el navegador libere la referencia al stream
+        // detenido y el hardware suelte el sensor antes del siguiente getUserMedia.
+        // Sin esto, algunos dispositivos ignoran el delay de 450 ms (DEC-021).
+        if (videoRef.current) videoRef.current.srcObject = null;
         cameraStopPendingRef.current = true;
       }
     };
