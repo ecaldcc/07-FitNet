@@ -258,3 +258,181 @@ standing     → voz dice solo el número de rep
 - Curl alterno (mancuernas, un brazo después del otro): 1 rep por brazo → 2 reps por ciclo completo.  
 - Vista lateral (un solo brazo visible): 1 rep por ciclo, igual que antes.  
 **Trade-off aceptado:** En curls alternos muy rápidos (<250 ms entre brazos), el cooldown podría suprimir el segundo brazo. A 60 fps y con la cadencia normal de un curl (>500 ms por brazo), este caso no debería ocurrir en condiciones reales de entrenamiento.
+
+---
+
+## DEC-026 · Migración del análisis a 3D con `worldLandmarks`
+**Fecha:** 2026-09-19  
+**Contexto:** Todos los cálculos angulares operaban sobre `result.landmarks`, las coordenadas normalizadas de pantalla. Ese espacio es una proyección: el ángulo medido depende de la posición y orientación de la cámara respecto al usuario. Un usuario girado 45° produce segmentos proyectados más cortos y ángulos sistemáticamente sobreestimados, al punto de que una sentadilla profunda real podía medirse como 120° en vez de 85°. La consecuencia práctica era pérdida de precisión y conteo poco confiable cuando el celular no estaba colocado en el ángulo ideal.  
+**Hallazgo clave:** `PoseLandmarker` ya devolvía en cada cuadro un segundo conjunto, `result.worldLandmarks`, con coordenadas métricas 3D, origen en el punto medio de la cadera e independientes de la cámara. La aplicación lo recibía y lo descartaba. No hizo falta cambiar de modelo ni agregar ninguna dependencia de visión: el dato ya estaba disponible.  
+**Alternativas consideradas:**  
+(a) Corregir la proyección 2D con un factor derivado de la orientación estimada — requiere calibración, es frágil y solo compensa parcialmente.  
+(b) Pedirle al usuario que se coloque siempre en el mismo ángulo — traslada el problema a la persona y no resuelve la imprecisión.  
+(c) Usar `worldLandmarks` y calcular ángulos con producto punto en 3D.  
+**Decisión:** Opción (c). Se agrega `src/geometry/vectors3d.ts` con `calculateAngle3D` basada en producto punto, más utilidades de orientación corporal, inclinación de tronco y asimetría. `detectAndDraw` pasa a devolver `PoseFrame` con ambos conjuntos: `screen` para dibujar el esqueleto sobre el video y `world` para toda la matemática. Los tres trackers se migran a `update(world, timeMs)`.  
+**Por qué producto punto y no `atan2`:** En 3D no existe un sentido de giro bien definido sin un plano de referencia, y para una articulación solo importa la apertura. El coseno se limita a [-1, 1] antes de `Math.acos` porque la acumulación de error en punto flotante puede producir 1.0000000002, cuyo arcocoseno es NaN.  
+**Validaciones nuevas que esto habilita:** Inclinación de tronco en sentadilla, arqueo lumbar en press y desplazamiento del codo en curl. Las tres eran indetectables en 2D porque el movimiento ocurre en profundidad, fuera del plano de la imagen, sin que la proyección cambie.  
+**Se conserva `angles.ts`:** El módulo 2D no se elimina. Queda como referencia y para cualquier cálculo que deba operar sobre coordenadas de pantalla.
+
+---
+
+## DEC-027 · Validación temporal de repeticiones
+**Fecha:** 2026-09-19  
+**Contexto:** El criterio de conteo era puramente posicional: si el ángulo cruzaba dos umbrales en secuencia, la repetición contaba. Ese criterio no distingue una sentadilla real de un tirón brusco, de un movimiento de ajuste o de un salto de landmarks de MediaPipe. Por eso "cualquier movimiento" sumaba repeticiones, que era la queja principal del usuario junto con la imprecisión de DEC-026.  
+**Decisión:** Agregar `src/analysis/movementQuality.ts` con la clase `MovementAnalyzer`, que acumula muestras de ángulo con marca de tiempo y evalúa cada ciclo antes de aceptarlo. Una repetición legítima debe cumplir cuatro condiciones a la vez: recorrido angular mínimo, duración mínima, duración máxima y continuidad del recorrido. Un artefacto no cumple las cuatro.  
+**Umbrales por ejercicio:** Cada tracker ajusta los valores a la cadencia natural de su movimiento. La sentadilla exige 40° de recorrido y 800 ms; el curl 50° y 700 ms; el press 45° y 700 ms.  
+**Criterio de calibración:** Los umbrales se eligieron deliberadamente permisivos. Es preferible dejar pasar alguna repetición dudosa a rechazar repeticiones legítimas de alguien que entrena lento o con pausa, porque el segundo error destruye la confianza en la aplicación mientras que el primero solo la degrada.  
+**Medición de suavidad:** Se cuentan las inversiones de signo de la velocidad angular, no la magnitud del jerk. Una repetición real tiene dos fases y por lo tanto un solo cambio de dirección significativo; un movimiento errático produce muchos. Contar inversiones es más robusto frente al ruido de MediaPipe porque no se deja arrastrar por un único cuadro atípico con derivada enorme. Se aplica un piso de ruido para que el temblor del modelo no cuente como inversión.  
+**Retroalimentación al usuario:** Cuando una repetición se descarta, el motivo se informa por texto y por voz. Sin ese aviso el usuario concluye que la aplicación falló, en vez de entender que el movimiento no fue válido.
+**Actualización 2026-09-22:** La medición de suavidad descrita arriba rechazaba todas las repeticiones con el temblor normal de MediaPipe. Se reemplazó por conteo de cambios de dirección con histéresis, y se agregó una duración mínima de la fase de esfuerzo. Ver DEC-035.  
+
+---
+
+## DEC-028 · Detección de fatiga por degradación del patrón de movimiento
+**Fecha:** 2026-09-19  
+**Contexto:** El usuario pidió detección de fatiga como parte del alcance de Fitnet. No hay sensores adicionales disponibles ni se pueden agregar sin romper la restricción de costo cero.  
+**Fundamento:** En entrenamiento de fuerza la velocidad de la fase concéntrica cae de forma monótona conforme se acumula fatiga dentro de una serie, incluso con la carga constante. Es el principio del entrenamiento basado en velocidad. Junto con la pérdida de recorrido y el aumento de asimetría entre lados, da una estimación razonable a partir de los mismos landmarks que ya se procesan.  
+**Decisión:** Agregar `src/analysis/fatigue.ts` con `FatigueDetector`. Las primeras tres repeticiones de cada serie establecen la línea base de velocidad y recorrido. A partir de ahí se compara el promedio de las últimas tres contra esa línea base. El puntaje combina caída de velocidad con peso 2, pérdida de recorrido con peso 1.5 y asimetría con peso 40, y se limita a 100.  
+**Por qué promediar las últimas tres y no la última:** Una repetición con un landmark ruidoso no debe disparar un salto de nivel. La asimetría además se suaviza con media móvil.  
+**Niveles:** fresco, moderado a partir de 10% de caída, alto a partir de 20% y crítico a partir de 30%. El nivel crítico activa `shouldRest` y el mensaje pasa a tener prioridad sobre el resto de la retroalimentación.  
+**Limitación declarada:** No es un diagnóstico médico ni una medición de fatiga fisiológica. Es un indicador de degradación del patrón, útil para sugerir descanso.  
+**Alcance de la línea base:** Se reinicia con `startNewSet` al cerrar cada serie, no con `reset`, para que el contador de repeticiones no se pierda al empezar una serie nueva.
+**Actualización 2026-09-22:** En curl y press la ventana de análisis empezaba cuando el brazo ya había subido, y lo que se medía como fase de esfuerzo era la bajada. La caída de velocidad al subir era invisible. Corregido en DEC-035.  
+
+---
+
+## DEC-029 · Visor 3D del esqueleto con Three.js
+**Fecha:** 2026-09-19  
+**Contexto:** El análisis pasó a 3D en DEC-026, pero la pantalla seguía mostrando únicamente la proyección plana del esqueleto sobre el video. No había forma de verificar visualmente que la profundidad se estuviera midiendo, ni de mostrarle al usuario qué información nueva tiene el sistema.  
+**Alternativas consideradas:**  
+(a) Proyectar el esqueleto 3D a mano sobre el canvas 2D existente — sin dependencias, pero con rotación, iluminación y orden de profundidad resueltos manualmente.  
+(b) Three.js.  
+**Decisión:** Opción (b), autorizada explícitamente por el usuario tras plantearle el costo. Se agrega `src/ui/Pose3DView.tsx`.  
+**Decisiones de implementación:**  
+- Actualización por API imperativa mediante `useImperativeHandle`, no por props. El bucle de detección corre a 60 cuadros por segundo y provocar un render de React por cuadro dejaría sin margen al hilo principal del celular.  
+- Los huesos son un único `LineSegments` cuyos vértices se reescriben en el lugar, y las articulaciones un `InstancedMesh` de 33 esferas. Ambas decisiones evitan crear objetos por cuadro.  
+- Se rota un grupo contenedor y no la cámara, para que la luz quede fija respecto al espectador y el esqueleto no se oscurezca al girar.  
+- El eje Y de `worldLandmarks` apunta hacia abajo y Three.js lo usa hacia arriba, de ahí la inversión de signo al copiar las coordenadas.  
+- La limpieza descarta geometrías, materiales y el contexto WebGL a mano. El recolector de basura de JavaScript no libera memoria de GPU.  
+**Carga diferida:** Three.js agregaba cerca de 540 kB al paquete principal y hacía que la cámara esperara a la librería de render. Se carga con `React.lazy`, por lo que queda en un fragmento aparte que solo se descarga al abrir el visor. El paquete inicial bajó de 999 kB a 458 kB.
+**Actualización 2026-09-22:** La escala original de la escena hacía que un cuerpo real midiera casi 7 unidades con una cámara que veía menos de 5: los pies quedaban fuera del cuadro. Se corrigió la escala y el encuadre, y se anclaron los pies al suelo. El mismo visor reproduce ahora las demos del tutorial (DEC-033).  
+
+---
+
+## DEC-030 · Catálogo de ejercicios y modelo de rutinas
+**Fecha:** 2026-09-19  
+**Contexto:** El usuario pidió un menú para crear y calendarizar rutinas de todos los músculos del cuerpo, con nivel de dificultad por ejercicio. La aplicación solo sabe analizar tres ejercicios por cámara, porque solo para esos tres existe un tracker con máquina de estados y umbrales validados.  
+**Tensión de fondo:** Un catálogo de cuerpo completo implica que la mayoría de los ejercicios no tendrán análisis de técnica. Ocultar esa diferencia le prometería al usuario algo que no se está haciendo.  
+**Decisión:** Catálogo mixto de 60 ejercicios en 11 grupos musculares, con un campo `tracking` que distingue tres modos: `camera` para los tres con análisis 3D, `reps` para conteo manual y `time` para temporizador. La distinción se muestra de forma explícita en toda la interfaz, con una etiqueta 3D en el selector y un botón "Analizar" contra una etiqueta "Manual" en la pantalla de inicio.  
+**Modelo de rutinas:** Una rutina agrupa días; cada día tiene un día de la semana, un nombre libre, los grupos musculares que cubre y sus ejercicios. Cada entrada de ejercicio lleva su propia dificultad, series, repeticiones, segundos de sostén, descanso y método. Solo una rutina puede estar activa, y es la que manda en el calendario de la pantalla de inicio.  
+**Dificultad:** Bajo, medio y alto. Al elegir un nivel se aplica un preajuste de volumen que el usuario puede ajustar después. El nivel no es solo una etiqueta: cambia series, repeticiones y descanso.  
+**Métodos de entrenamiento:** Se incluyen series normales, rest-pause, dropset y superserie, pedidos explícitamente. La división empuje, tirón y pierna se entrega como plantilla sembrada en el primer arranque, junto con una de cuerpo completo y una división por músculo.  
+**Persistencia:** `localStorage`, según la restricción de no usar backend. Los identificadores se generan localmente y las fechas se guardan como epoch en milisegundos para evitar ambigüedad de zona horaria al serializar.
+
+---
+
+## DEC-031 · Perfil, progreso y logros derivados del historial
+**Fecha:** 2026-09-19  
+**Contexto:** El alcance de Fitnet pide perfil de usuario con progresos, logros y definición de objetivos.  
+**Decisión de diseño principal:** Nada de progreso se almacena de forma acumulada. Todas las estadísticas, el progreso de objetivos y los logros se derivan del historial de sesiones en cada render. El historial es la única fuente de verdad.  
+**Razón:** Un contador acumulado puede desincronizarse por un error y quedar contradiciendo lo que muestra el historial, sin forma de saber cuál de los dos miente. Derivar elimina esa clase de error por completo. El costo de recalcular es despreciable frente al límite de 300 sesiones guardadas.  
+**Cálculo de racha:** Se cuenta hacia atrás desde hoy. Si hoy todavía no se entrenó, la racha sigue viva cuando ayer sí, porque el día aún no terminó. Las claves de día se arman con componentes locales y no con `toISOString`, que convierte a UTC y corre un día entero en zonas horarias negativas como la de Guatemala.  
+**Objetivos:** Cuatro tipos, según frecuencia semanal, repeticiones acumuladas, sesiones completadas o días de racha. Cada uno se contrasta contra la estadística que le corresponde.  
+**Logros:** Ocho, con progreso parcial visible cuando aún no se desbloquean.
+
+---
+
+## DEC-032 · Navegación: HashRouter y contexto de React
+**Fecha:** 2026-09-19  
+**Contexto:** La aplicación pasó de una sola pantalla de cámara a cinco vistas: inicio, rutinas, editor de rutina, entrenamiento y perfil. Hacía falta navegación y estado compartido.  
+**Decisión de enrutado:** `HashRouter` de react-router-dom, no `BrowserRouter`.  
+**Razón:** Con rutas basadas en fragmento, el documento servido es siempre `index.html`. Eso evita depender de reglas de reescritura del hosting, que el proyecto no tiene configuradas, y mantiene la navegación funcionando con la PWA instalada y sin red. Con `BrowserRouter`, abrir directamente una ruta profunda devolvería 404 salvo que se agregue configuración en Vercel, y el service worker network-first de DEC-025 tendría que resolver el caso sin conexión.  
+**Estructura de rutas:** La pantalla de entrenamiento queda fuera del contenedor con barra de navegación, porque ocupa todo el alto y no debe compartir espacio con la barra.  
+**Decisión de estado:** Contexto de React, sin librería de estado. El árbol es chico y el dato cabe entero en memoria. Cada escritura persiste de inmediato en `localStorage`, por lo que no hay guardado explícito ni riesgo de perder cambios al cerrar la aplicación.  
+**Registro de sesiones (corregido 2026-09-22):** La versión inicial de esta entrada afirmaba que la pantalla de cámara vivía fuera del proveedor de contexto, y releía el historial al recibir el evento `focus` de la ventana. Era falso: todas las rutas están dentro del proveedor, y la navegación interna no dispara `focus`, así que la pantalla de inicio no reflejaba lo entrenado hasta cambiar de ventana. Las pantallas de entrenamiento registran ahora la sesión con `recordSession` del contexto, que la guarda y actualiza el estado en el mismo instante. El contexto y el hook se separaron del componente proveedor para que la recarga en caliente de Vite funcione.  
+**Acceso defensivo generalizado:** El criterio de DEC-024 se extiende a todo el proyecto en `src/storage/localStore.ts`, que además valida la forma del dato recuperado. Un JSON corrupto o de una versión anterior del esquema no debe propagarse al resto de la aplicación.
+
+---
+
+## DEC-033 · Tutorial de técnica por ejercicio
+**Fecha:** 2026-09-22  
+**Contexto:** El usuario pidió un tutorial de cada ejercicio para ver la forma correcta de hacerlo. El catálogo tiene 60 ejercicios; solo 3 tienen análisis por cámara.  
+**Alternativas consideradas:**  
+(a) Videos o GIF de internet — descartado por derechos de autor, por depender de la red en una PWA pensada para funcionar sin conexión, y por no poder controlar la calidad.  
+(b) Ilustraciones de inicio y fin de cada movimiento — 120 imágenes hechas a mano, con calidad difícil de sostener.  
+(c) Ficha escrita para los 60, más demo 3D animada en los 3 con análisis.  
+(d) Ficha escrita más demo 3D en los cerca de 20 ejercicios de peso corporal.  
+**Decisión:** Opción (c), elegida por el usuario. La demo aporta más donde la app evalúa, porque muestra exactamente la técnica contra la que se compara al usuario. En ejercicios con máquina o polea, un esqueleto sin el equipo no enseña nada.  
+**Ficha:** Pasos, errores comunes, respiración, músculos, equipo, consejo clave, y en los 3 con cámara, dónde colocar el celular. Once ejercicios de riesgo llevan una advertencia de seguridad. Todo en `src/exercises/tutorials.ts`, texto propio. El campo `videoUrl` queda reservado para grabaciones propias del equipo.  
+**Demo 3D por cinemática directa:** `src/exercises/demoPoses.ts` genera los 33 landmarks a partir de unos pocos ángulos articulares por fase, en el mismo sistema de coordenadas que `worldLandmarks`. Se dibuja con el mismo `Pose3DView` del análisis en vivo, y el ángulo que se muestra se calcula con `calculateAngle3D`, la función que evalúa al usuario. Lo que se enseña y lo que se exige coinciden por construcción.  
+**Consecuencia no planeada, y la más valiosa:** Las demos sirvieron como datos de prueba del motor. Alimentar los trackers reales con ellas destapó tres errores graves (DEC-034 y DEC-035) que habrían llegado al celular.  
+**Cuándo se muestra:** A pedido, desde la biblioteca, el inicio, el editor de rutinas, el selector de ejercicios, el modo manual y la vista de cámara. Además, por elección del usuario, se abre solo la primera vez que alguien entrena cada ejercicio con cámara. Mientras está abierto, la detección se pausa: nadie debe sumar repeticiones mientras lee.  
+**Por qué la hoja usa un portal:** El selector de ejercicios usa `backdrop-filter`, que convierte a su contenedor en el marco de referencia de los elementos fijos. Sin `createPortal`, la hoja del tutorial quedaría atrapada dentro del selector.
+
+---
+
+## DEC-034 · Sentadilla: confirmación del fondo independiente de la velocidad de cuadros
+**Fecha:** 2026-09-22  
+**Contexto:** Al pasar la demo de sentadilla por el tracker real, a 60 cuadros por segundo se contaron **cero** repeticiones, aunque el ángulo recorría de 80° a 173° y la retroalimentación salía verde.  
+**Causa:** El fondo se confirmaba solo si el ángulo subía más de 2° entre un cuadro y el siguiente. Eso hace depender el conteo de la velocidad de cuadros: a 60 fps, una subida controlada avanza menos de 2° por cuadro y nunca se confirma. El error viene del código original y el cambio a 3D lo heredó. En curl y press el equipo ya había corregido este patrón en DEC-016, pero la sentadilla quedó con la versión vieja. Es una explicación plausible del conteo errático en celulares rápidos.  
+**Decisión:** El fondo se confirma cuando el ángulo ya subió 8° por encima del mínimo acumulado en la bajada. No depende de cuántos cuadros haya, y 8° de margen supera con holgura el temblor de los landmarks. La histéresis de fases, que mantiene `squatting` hasta los 160°, garantiza que la confirmación ocurra antes de cerrar el ciclo.  
+**Verificado:** 5 de 5 repeticiones contadas a 15, 30 y 60 fps.
+
+---
+
+## DEC-035 · Analizador de movimiento: histéresis, forma del ciclo y fase de esfuerzo mínima
+**Fecha:** 2026-09-22  
+**Contexto:** El banco de pruebas encontró dos defectos graves en el diseño de DEC-027 y DEC-028.  
+**Defecto 1, el más serio:** Con 8 mm de temblor por landmark, que es lo normal en MediaPipe, se rechazaban **todas** las repeticiones como "movimiento irregular". La suavidad contaba cada cambio de signo de la velocidad cuadro a cuadro, y el ruido producía decenas por repetición. En un celular real, la validación de DEC-027 habría dejado la app contando cero.  
+**Corrección 1:** Cambios de dirección con histéresis. Solo cuenta un cambio cuando el ángulo retrocede más de 12° desde el último extremo. El temblor no alcanza ese margen; un titubeo real sí. Se toleran hasta dos titubeos antes de considerar el movimiento irregular, siguiendo el criterio de DEC-027 de preferir aceptar una repetición dudosa antes que rechazar una legítima.  
+**Defecto 2:** En curl y press la ventana de análisis empezaba al entrar en la fase de contracción, cuando el brazo ya había subido. Lo que se medía como fase de esfuerzo era en realidad la bajada, así que la fatiga al subir era invisible.  
+**Corrección 2:** Cada ejercicio declara la forma de su ciclo: si el esfuerzo es el ángulo mínimo o el máximo, y si el ciclo empieza con el esfuerzo (curl y press) o con la bajada (sentadilla). La ventana arranca en la última vuelta a la posición de reposo, y la pausa en reposo antes de moverse se recorta buscando el último cuadro dentro de 6° del extremo de reposo.  
+**Corrección 3:** Con el filtro de DEC-036, dos tirones seguidos de press podían fusionarse en un ciclo de más de 800 ms. Lo que los delata es la fase de empuje, de 167 ms. Se agregó una duración mínima de la fase de esfuerzo de 250 ms. Una fase controlada dura 400 ms o más incluso a ritmo rápido, y el banco confirma que un ciclo de 1.5 s sigue contando.  
+**Descartado:** Subir la duración mínima del press a 800 ms. Se probó, no resolvía el caso, y se revirtió.
+
+---
+
+## DEC-036 · Filtro One Euro sobre los landmarks
+**Fecha:** 2026-09-22  
+**Contexto:** Aun con la histéresis de DEC-035, un temblor de 15 mm seguía rompiendo el conteo en curl y press. En segmentos cortos como el antebrazo, 15 mm equivalen a varios grados.  
+**Alternativas consideradas:**  
+(a) Subir el umbral de histéresis — tapa el síntoma y debilita la detección de movimientos erráticos reales.  
+(b) Promedio móvil sobre los landmarks — obliga a elegir entre temblor y retraso.  
+(c) Filtro One Euro.  
+**Decisión:** Opción (c), en `src/pose/landmarkFilter.ts`. Adapta su frecuencia de corte a la velocidad: filtra fuerte con el punto casi quieto, donde el temblor es lo único que hay, y deja pasar el movimiento rápido, donde el retraso sí importaría. Es la técnica estándar para estabilizar poses y manos en tiempo real (Casiez, Roussel y Vogel, CHI 2012).  
+**Dónde se aplica:** Una sola vez, en la vista de cámara, antes de los trackers y del visor 3D. Todo lo que mide trabaja sobre la señal filtrada. La visibilidad no se filtra: los trackers la usan como compuerta y un valor retrasado dejaría pasar cuadros donde el punto ya no se ve.  
+**Parámetros:** Corte mínimo 1.2 Hz, beta 0.8, corte de derivada 1 Hz. El filtro se reinicia si pasan más de 500 ms sin cuadros, para no arrastrar una posición vieja cuando el detector pierde a la persona.  
+**Verificado:** 5 de 5 repeticiones con 8 y 15 mm de temblor en los tres ejercicios.
+
+---
+
+## DEC-037 · Modo manual para los ejercicios sin cámara
+**Fecha:** 2026-09-22  
+**Contexto:** De los 60 ejercicios del catálogo, 57 se podían agregar a una rutina pero no ejecutar: no existía contador manual ni temporizador. En la pantalla de inicio figuraban con una etiqueta "Manual" que no llevaba a ninguna parte.  
+**Decisión:** Pantalla de entrenamiento manual en `/manual`, con contador de repeticiones de botones grandes, temporizador circular para los ejercicios por tiempo, cronómetro de descanso, y registro en el historial para que cuente en el perfil y los logros. Una sola función, `startPath`, decide si un ejercicio va a la cámara o al modo manual, para que ningún botón pueda mandar un ejercicio al lugar equivocado.  
+**Lógica en un reductor puro:** `src/routines/manualWorkout.ts`. El tiempo nunca se lee adentro: llega en cada acción. Eso lo hace determinista y comprobable sin relojes reales.  
+**Métodos de entrenamiento:**  
+- Rest-pause: tras la serie principal, mini-series con 15 s de descanso entre ellas; todo suma en una sola serie.  
+- Dropset: tras la serie principal, descensos de carga sin descanso, con la indicación de bajar entre 20 y 30 %.  
+- Superserie: sin descanso tras la serie, con la indicación de pasar al ejercicio pareado.  
+**Limitación declarada de la superserie:** La app indica alternar, pero no encadena los dos ejercicios en una misma pantalla, y el editor todavía no permite elegir con qué ejercicio se empareja. El campo `supersetWith` existe en el modelo pero no tiene interfaz.  
+**Pantalla encendida:** Se pide `navigator.wakeLock` durante el entrenamiento y se vuelve a pedir al regresar a primer plano. Sin esto, el celular se bloquea en medio de un descanso de 90 segundos. Si el navegador no lo soporta, la app funciona igual.  
+**Relojes:** Basados en marcas de tiempo de fin, no en contadores que se decrementan. Un intervalo puede atrasarse o frenarse en segundo plano; la resta contra la hora real no.  
+**Terminar antes:** Lo hecho en la serie en curso se guarda. Salir con trabajo hecho lleva al resumen en vez de perderlo.
+
+---
+
+## DEC-038 · Banco de pruebas del motor sin cámara
+**Fecha:** 2026-09-22  
+**Contexto:** Todo el análisis de movimiento se había escrito sin poder probarlo en celular. Tres errores graves solo aparecieron al pasar movimientos sintéticos por los trackers reales.  
+**Decisión:** `scripts/pruebas-motor.mjs`, que se corre con `npm run test:motor`. Compila los módulos puros con el TypeScript del proyecto y los alimenta con las demos del tutorial, a distintas velocidades de cuadro y con ruido gaussiano de semilla fija. No agrega dependencias.  
+**Qué cubre:** 37 pruebas. Técnica correcta a 15, 30 y 60 fps; temblor de 8 y 15 mm; ritmo rápido legítimo; tirones; recorridos parciales; fatiga progresiva; y los cuatro métodos del modo manual, con pausas del temporizador y salidas anticipadas.  
+**Qué no cubre, y hay que decirlo:** La calidad de los landmarks reales ni el comportamiento con una persona frente a la cámara. Las demos son movimientos perfectos con ruido agregado; una persona real se mueve distinto. El banco sirve para no romper lo que ya funciona, no para calibrar umbrales: eso solo se hace en celular.
+
+---
+
+## DEC-039 · Registro de la interfaz: tuteo
+**Fecha:** 2026-09-22  
+**Contexto:** La app original usa "tú" ("Apunta tu cámara", "Baja un poco más", "Asegúrate"), y el usuario también escribe en "tú". En la fase 6 se introdujo voseo ("Bajá", "Pegá", "Tenés") en todos los textos nuevos, y el onboarding original ya tenía un caso aislado ("Posicioná... empezá").  
+**Decisión:** Tuteo en toda la interfaz. Se corrigieron 68 casos con un mapa exacto de formas verbales, aplicado solo sobre palabras completas y verificado después con un escáner que reconoce tildes.  
+**Mensajes de error de cámara:** El navegador los entrega en inglés ("Permission denied"). Se traducen a mensajes accionables en español según el tipo de error, por la restricción 6 del proyecto.

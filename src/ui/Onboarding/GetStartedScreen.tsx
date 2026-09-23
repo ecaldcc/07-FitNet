@@ -129,7 +129,7 @@ export function GetStartedScreen({ onComplete }: Props) {
       </div>
 
       <p className="ob-start-hint">
-        Podés cambiar de cámara en cualquier momento dentro de la app.
+        Puedes cambiar de cámara en cualquier momento dentro de la app.
       </p>
 
       <button className="ob-btn" onClick={handleStart}>

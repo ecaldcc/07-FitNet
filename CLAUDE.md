@@ -35,7 +35,7 @@ Estas restricciones existen por requerimientos del curso, del equipo, o del alca
 - Cálculo de ángulos articulares (rodilla, codo, hombro, cadera) mediante trigonometría.
 - Máquina de estados para conteo de repeticiones por ejercicio.
 - Sistema de evaluación de forma con retroalimentación visual (verde/amarillo/rojo) basado en rangos angulares.
-- Entre **3 y 5 ejercicios concretos**: sentadillas, bíceps curl, press de hombro, plancha, lunges (los últimos dos son opcionales según tiempo).
+- Entre **5 y 6 rutinas concretas**: sentadillas, bíceps curl, press de hombro, plancha, lunges (los últimos dos son opcionales según tiempo).
 - Instalable como PWA (manifest, service worker básico).
 - Deploy funcional en URL pública.
 
@@ -192,12 +192,41 @@ Lo que se entrega en Canvas el 22/05 y se presenta el 23/05.
 
 > **Esta sección se actualiza cada vez que el proyecto avanza.** Claude Code debe mantenerla viva.
 
-**Última actualización:** 2026-05-21
+**Última actualización:** 2026-09-22
 
-**Directorio de trabajo:** `C:\Dev-AI\entrenador-personal-ia` (fuera de OneDrive — ver DEC-007).
+**Directorio de trabajo:** `C:\Users\Edwar\Documents\entrenador-personal-ia`. El directorio histórico `C:\Dev-AI\entrenador-personal-ia` (DEC-007) corresponde a la máquina donde se desarrolló la entrega del curso; este es un clon posterior del repositorio de GitHub. El criterio de DEC-007, mantenerse fuera de OneDrive, se sigue cumpliendo.
 
-**Hito actual:** Fase 5 — Proyecto completo y listo para entrega. App en producción con los 3 ejercicios operativos. Documentación del curso finalizada: `docs/descripcion-proyecto.md` (descriptor técnico con redacción académica, 12 secciones) y `docs/manual-usuario.md` (manual de usuario con todos los casos de uso, 11 secciones, 29 espacios para capturas de pantalla). Ambos documentos exportados a Word para entrega en Canvas. Los 3 ejercicios comprometidos están operativos: sentadillas (`SquatTracker`), curl de bíceps (`BicepCurlTracker`, vistas frontal y lateral), y press de hombro (`ShoulderPressTracker`, polaridad invertida, umbrales clínicos). Conteo unificado con OR logic + cooldown en curl y press (DEC-022/023). PWA instalable con service worker (SW network-first para HTML, cache-first para assets — DEC-025) y manifest (DEC-006). Deploy automático en Vercel en cada push a `main` (DEC-019). Bug de hardware de cámara en modo standalone corregido con delay de 450 ms (DEC-021). localStorage con try/catch y validación de valor en todos los puntos de acceso (DEC-024). Selector de ejercicio con chips desplazables en barra inferior. Feedback de voz sin colisiones (DEC-016/017).
+**Hito actual:** Fase 6 — Expansión post-entrega hacia **Fitnet**, una aplicación de gimnasio completa. El proyecto del curso se entregó el 22/05/2026 y esa entrega está cerrada. A partir del 19/09/2026 se trabaja sobre un clon del repositorio en un alcance nuevo y más amplio, pedido por el usuario y fuera del alcance académico original.
 
-**Decisiones técnicas tomadas:** React, Vite, TypeScript, `@mediapipe/tasks-vision` (Tasks API), WASM vía CDN jsDelivr, directorio en `C:\Dev-AI`, onboarding CSS nativo, `calculateAngle` con `atan2`, histéresis de umbral doble, overlay DOM con barra inferior, `SpeechSynthesis` para voz, `ArmTracker` interno para bicep curl, `ArmPressTracker` para press, conteo unificado OR+cooldown en curl y press, PWA manual, SW network-first para HTML, deploy en Vercel, HTTPS local con `@vitejs/plugin-basic-ssl`, delay 450 ms cambio de cámara, localStorage defensivo. Documentadas en `DECISIONS.md` (DEC-001 a DEC-025).
+**Lo entregado en el curso (sin cambios):** los 3 ejercicios operativos, PWA instalable, deploy en Vercel y la documentación de Canvas en `docs/`.
 
-**Próximo paso:** Entrega en Canvas el 22/05/2026 — link PWA en Vercel + link repositorio GitHub + `descripcion-proyecto.docx` + `manual-usuario.docx`. Presentación 23/05/2026.
+**Lo agregado en la fase 6 (en árbol de trabajo, sin commit todavía):**
+- **Análisis 3D real (DEC-026).** El motor pasó de `landmarks` (proyección de pantalla) a `worldLandmarks` (coordenadas métricas 3D, independientes de la cámara), que MediaPipe ya entregaba y la app descartaba. `src/geometry/vectors3d.ts` con `calculateAngle3D` por producto punto, orientación corporal, inclinación de tronco y asimetría. Habilita validaciones antes imposibles: inclinación en sentadilla, arqueo lumbar en press y desplazamiento de codo en curl.
+- **Filtro de temblor (DEC-036).** Filtro One Euro sobre los landmarks antes de cualquier cálculo, en `src/pose/landmarkFilter.ts`.
+- **Validación temporal de repeticiones (DEC-027, corregida en DEC-035).** Una repetición exige recorrido, duración, fase de esfuerzo mínima y continuidad. La continuidad se mide con cambios de dirección con histéresis. El motivo del rechazo se informa por texto y por voz.
+- **Sentadilla sin dependencia de la velocidad de cuadros (DEC-034).** El criterio original no contaba nada a 60 fps.
+- **Detección de fatiga (DEC-028, corregida en DEC-035).** Caída de velocidad concéntrica, pérdida de recorrido y asimetría contra una línea base de 3 repeticiones.
+- **Visor 3D con Three.js (DEC-029).** Rotable con el dedo, carga diferida, pies anclados al suelo.
+- **Catálogo y rutinas (DEC-030).** 60 ejercicios en 11 grupos musculares. Rutinas con días de la semana, dificultad por ejercicio y métodos rest-pause, dropset y superserie. Tres plantillas sembradas, incluida empuje/tirón/pierna.
+- **Tutorial por ejercicio (DEC-033).** Ficha escrita para los 60 y demo 3D animada en los 3 con cámara. Se abre sola la primera vez con cada ejercicio de cámara. Biblioteca navegable por grupo muscular.
+- **Modo manual (DEC-037).** Los 57 ejercicios sin cámara se ejecutan con contador, temporizador y descansos, con los cuatro métodos, y quedan en el historial.
+- **Perfil (DEC-031).** Objetivos, progreso, racha, logros e historial, todo derivado del historial de sesiones.
+- **Navegación (DEC-032).** Siete pantallas con `HashRouter` y contexto de React. Las sesiones se registran con `recordSession` del contexto.
+- **Banco de pruebas (DEC-038).** `npm run test:motor`, 37 pruebas sin cámara ni dependencias nuevas.
+- **Interfaz en tuteo (DEC-039),** incluidos los mensajes de error de cámara, que el navegador entregaba en inglés.
+
+**Dependencias nuevas:** `three`, `@types/three` y `react-router-dom`, autorizadas explícitamente por el usuario tras plantearle el costo.
+
+**Decisiones técnicas tomadas:** React, Vite, TypeScript, `@mediapipe/tasks-vision` (Tasks API), WASM vía CDN jsDelivr, onboarding CSS nativo, histéresis de umbral doble, overlay DOM con barra inferior, `SpeechSynthesis` para voz, `ArmTracker` y `ArmPressTracker`, conteo unificado OR+cooldown, PWA manual, SW network-first para HTML, deploy en Vercel, HTTPS local con `@vitejs/plugin-basic-ssl`, delay 450 ms al cambiar de cámara, localStorage defensivo, análisis 3D con `worldLandmarks`, filtro One Euro, validación temporal con histéresis, fatiga por velocidad, Three.js con carga diferida, catálogo mixto, HashRouter, tutorial con demo por cinemática directa, modo manual con reductor puro, tuteo. Documentadas en `DECISIONS.md` (DEC-001 a DEC-039).
+
+**Estado de verificación (2026-09-22):**
+- `npm run build`, `npx tsc` y `npm run lint` pasan limpios.
+- `npm run test:motor`: 37 de 37. Cubre técnica correcta a 15, 30 y 60 fps, temblor de 8 y 15 mm, ritmo rápido, tirones, recorridos parciales, fatiga y el modo manual.
+- Recorrido en navegador de escritorio con vista de celular: onboarding, inicio, biblioteca, fichas, demos 3D de press y sentadilla, editor, selector con ficha, tutorial de primera vez, modo manual por repeticiones y por tiempo, y actualización del inicio al guardar.
+- **No se probó con una persona frente a la cámara.** El navegador de prueba no tiene cámara. Según la sección 10, esa es la prueba que vale para todo lo que toca detección. Los umbrales pasan con movimientos sintéticos y falta calibrarlos con movimientos reales.
+
+**Próximo paso:**
+1. Probar en celular con HTTPS y calibrar umbrales de validación, fatiga y filtro con movimientos reales.
+2. Decidir sobre la capa de IA aprendida. Arquitectura conversada: normalización canónica de los 33 puntos 3D, segmentación de fases con modelo temporal, autocodificador para patrón incorrecto y clasificador de ejercicio, en el navegador con TensorFlow.js u ONNX Runtime Web. El cuello de botella es la data. Atajo: etiquetar fases automáticamente con el sistema de umbrales y entrenar con supervisión débil.
+3. Interfaz para emparejar ejercicios en superserie.
+4. Commit de la fase 6, que sigue sin hacerse.

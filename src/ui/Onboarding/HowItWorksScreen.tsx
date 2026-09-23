@@ -26,7 +26,7 @@ export function HowItWorksScreen({ onNext }: Props) {
           </div>
           <div className="ob-step-body">
             <h3>Apunta tu cámara</h3>
-            <p>Posicioná tu cuerpo completo en el encuadre y empezá el ejercicio.</p>
+            <p>Posiciona tu cuerpo completo en el encuadre y empieza el ejercicio.</p>
           </div>
         </div>
 

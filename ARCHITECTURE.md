@@ -1,7 +1,7 @@
 # Arquitectura del proyecto
 
 > Documento vivo. Se actualiza a medida que el proyecto evoluciona.  
-> Última actualización: 2026-05-06 — Fase 1b: onboarding PWA de 4 pantallas.
+> Última actualización: 2026-09-22 — Fase 6: análisis 3D, rutinas y perfil. Ver la sección final.
 
 ---
 
@@ -193,3 +193,175 @@ Se usa `100dvw` / `100dvh` (dynamic viewport units) en lugar de `100vw` / `100vh
 | Routing entre pantallas | Al agregar `ExerciseSelector`, se necesita decidir si usar estado de React (`useState`) o un router mínimo (`wouter` o React Router). Preferir estado hasta que la complejidad lo justifique |
 | Plugin PWA | Diferido hasta semana 5-6. Ver DEC-006 en `DECISIONS.md` |
 | Plataforma de deploy | GitHub Pages, Vercel o Netlify. Sin decidir aún |
+
+---
+
+# Fase 6 · Arquitectura de Fitnet
+
+> Agregado el 2026-09-22. Todo lo anterior en este documento describe la aplicación
+> tal como se entregó al curso el 22/05/2026 y sigue siendo válido salvo donde esta
+> sección lo corrige explícitamente.
+
+## Qué cambió en el flujo de datos
+
+El cambio de fondo es que el pipeline dejó de operar sobre coordenadas de pantalla y
+pasó a operar sobre coordenadas métricas 3D. El diagrama de la sección de visión general
+sigue siendo correcto hasta el detector; de ahí en adelante se bifurca.
+
+```
+ MediaPipe PoseLandmarker
+ detectForVideo(video, timestamp)
+      │
+      ├─── result.landmarks[33]  (normalizados de PANTALLA)
+      │         └──► DrawingUtils ──► <canvas> overlay   [solo dibujo]
+      │
+      └─── result.worldLandmarks[33]  (METROS, origen en cadera)
+                │
+                ▼
+           pose/landmarkFilter.ts   filtro One Euro: quita el temblor (DEC-036)
+                │
+                ├──► geometry/vectors3d.ts
+                │    calculateAngle3D, getBodyOrientation,
+                │    getTorsoInclination, asymmetryRatio
+                │         │
+                │         ▼
+                │    exercises/*.ts   máquina de estados
+                │         │
+                │         ├──► analysis/movementQuality.ts
+                │         │    ¿el ciclo fue un movimiento real?
+                │         │         │
+                │         │         ▼
+                │         └──► analysis/fatigue.ts
+                │              ¿está cayendo el rendimiento?
+                │                    │
+                │                    ▼
+                │              ui/ExerciseOverlay.tsx
+                │
+                └──► ui/Pose3DView.tsx   [Three.js, esqueleto rotable]
+```
+
+La separación importante es que `landmarks` quedó reducido a un rol puramente visual.
+Ninguna decisión del sistema se toma ya sobre coordenadas de pantalla.
+
+## Módulos nuevos
+
+### `src/geometry/vectors3d.ts`
+Álgebra vectorial sobre los `worldLandmarks`. `calculateAngle3D` usa producto punto en
+lugar de `atan2` porque en tres dimensiones no hay un sentido de giro definido sin un
+plano de referencia, y para una articulación solo importa la apertura. Incluye además
+orientación del torso respecto a la cámara, inclinación de tronco y asimetría entre lados.
+Exporta `LM`, la tabla de índices de landmarks que antes estaba duplicada en cada tracker.
+
+### `src/analysis/movementQuality.ts`
+`MovementAnalyzer` acumula muestras de ángulo con marca de tiempo en un buffer acotado y
+evalúa cada ciclo antes de aceptarlo como repetición. Es el módulo que separa un
+movimiento real de un artefacto. Cada tracker le declara la forma de su ciclo: si el
+esfuerzo es el ángulo mínimo o el máximo, y si el ciclo empieza con el esfuerzo o con la
+bajada. Sin ese dato no se sabe cuál mitad es la concéntrica (DEC-035).
+
+La suavidad se mide contando cambios de dirección con histéresis: solo cuenta un cambio
+cuando el ángulo retrocede más de 12° desde el último extremo. La primera versión contaba
+cada cambio de signo de la velocidad y el temblor normal de MediaPipe hacía rechazar todas
+las repeticiones.
+
+### `src/analysis/fatigue.ts`
+`FatigueDetector` establece una línea base con las primeras repeticiones de la serie y
+después mide la degradación. Es independiente del ejercicio: consume las métricas que
+produce `MovementAnalyzer` y no sabe nada de ángulos ni de anatomía.
+
+### `src/exercises/types.ts`
+Contrato común de los tres trackers. Antes cada uno definía su propio tipo de resultado
+sin nada en común, lo que obligaba a la interfaz a hacer verificaciones de tipo para
+leer campos compartidos. Ahora todos extienden `BaseExerciseResult`.
+
+### `src/exercises/catalog.ts`
+Catálogo de 60 ejercicios en 11 grupos musculares. El campo `tracking` distingue los que
+tienen análisis por cámara de los de conteo manual o temporizador, y esa distinción se
+propaga a toda la interfaz.
+
+### `src/routines/` y `src/profile/`
+Dominio puro, sin dependencias de React salvo el contexto. `types.ts` define el modelo,
+`storage.ts` la persistencia y las plantillas sembradas, `context.ts` el contrato y el
+hook, y `RoutinesProvider.tsx` el componente proveedor. Están separados porque la recarga
+en caliente de Vite solo preserva el estado de archivos que exportan únicamente
+componentes. El perfil deriva todas sus estadísticas del historial de sesiones en vez de
+mantener contadores acumulados.
+
+Las sesiones se registran con `recordSession` del contexto, que guarda y actualiza el
+estado en el mismo instante. Todas las rutas, incluidas las de entrenamiento, viven
+dentro del proveedor.
+
+### `src/routines/manualWorkout.ts`
+Reductor puro del modo manual: series, rondas de rest-pause y dropset, descansos y
+temporizador. El tiempo llega en cada acción y nunca se lee adentro, lo que lo vuelve
+determinista y comprobable sin relojes reales (DEC-037). La pantalla
+`ui/screens/ManualWorkoutScreen.tsx` solo le agrega relojes, voz, vibración y el bloqueo
+de pantalla apagada.
+
+### `src/pose/landmarkFilter.ts`
+Filtro One Euro por coordenada de cada landmark (DEC-036). Se aplica una sola vez en la
+vista de cámara, antes de los trackers y del visor, así que todo lo que mide trabaja
+sobre la señal filtrada.
+
+### `src/exercises/tutorials.ts` y `src/exercises/demoPoses.ts`
+Fichas de técnica de los 60 ejercicios y demos animadas de los 3 con análisis (DEC-033).
+Las demos generan los 33 landmarks por cinemática directa, en el mismo sistema de
+coordenadas que `worldLandmarks`. Eso permite dibujarlas con el mismo visor y usarlas como
+datos de prueba del motor.
+
+### `src/ui/startExercise.ts`
+Única función que decide si un ejercicio arranca en la cámara o en el modo manual. Ningún
+botón de la app arma esa ruta por su cuenta.
+
+### `src/ui/tutorial/`
+La ficha (`ExerciseTutorialContent`), la demo (`ExerciseDemo3D`) y la hoja deslizable
+(`TutorialSheet`). La ficha no incluye botones: cada contenedor agrega los suyos. La hoja
+se monta con un portal porque el selector de ejercicios usa `backdrop-filter`, que
+atraparía a cualquier elemento fijo dentro de él.
+
+### `scripts/pruebas-motor.mjs`
+Banco de 37 pruebas sin cámara ni dependencias nuevas, con `npm run test:motor`
+(DEC-038). Compila los módulos puros y los alimenta con las demos a distintas velocidades
+de cuadro y con ruido.
+
+### `src/storage/localStore.ts`
+Generaliza a todo el proyecto el acceso defensivo que DEC-024 había aplicado punto por
+punto. Además de capturar excepciones, valida la forma del dato recuperado, de modo que
+un JSON corrupto o de un esquema anterior no se propague.
+
+### `src/ui/Pose3DView.tsx`
+Visor Three.js. Se actualiza por API imperativa y no por props, porque un render de React
+por cuadro a 60 cuadros por segundo no deja margen al hilo principal en un celular.
+Se carga de forma diferida para que Three.js no bloquee el arranque de la cámara.
+Ancla el punto más bajo de los pies visibles al suelo de la escena: como `worldLandmarks`
+tiene el origen en la cadera, sin esto en una sentadilla subirían los pies en vez de bajar
+la cadera.
+
+## Decisiones de diseño nuevas
+
+### Los trackers ya no reciben el tiempo implícitamente
+`update(world, timeMs)` recibe la marca de tiempo del cuadro como parámetro. Antes la
+máquina de estados era puramente posicional y no necesitaba saber cuándo ocurría cada
+cuadro. La validación temporal y la detección de fatiga dependen de esa marca, y pasarla
+explícitamente en vez de leer `performance.now()` dentro del tracker mantiene a los
+trackers deterministas y testeables.
+
+### Separación entre reiniciar y empezar serie nueva
+`reset` borra todo, incluido el contador de repeticiones. `startNewSet` reinicia solo la
+línea base de fatiga y el buffer de análisis. Sin esa distinción, cerrar una serie
+perdería el conteo acumulado del ejercicio.
+
+### La interfaz no re-renderiza por cuadro
+Los acumuladores de la sesión viven en referencias y no en estado de React. Solo el
+resultado del ejercicio provoca render, porque es lo único que el usuario ve cambiar.
+
+## Lo que quedó pendiente
+
+| Área | Pendiente |
+|---|---|
+| Prueba en celular | Nada de la fase 6 se probó con una persona frente a la cámara. El banco de pruebas y el navegador de escritorio cubren todo lo demás, pero la sección 10 del CLAUDE.md es clara: la prueba que vale es en celular |
+| Calibración | Los umbrales de validación, de fatiga y del filtro pasan el banco de pruebas con movimientos sintéticos. Falta ajustarlos con movimientos de personas reales |
+| Capa de IA aprendida | Conversada y no construida. Reemplazaría los umbrales por segmentación de fases con un modelo temporal sobre los 33 puntos normalizados. Las demos por cinemática directa y el banco de pruebas son una base útil para generar y validar datos |
+| Ejercicios con análisis | Siguen siendo tres. Los otros 57 se ejecutan en el modo manual, sin análisis de técnica |
+| Superserie | La app indica alternar ejercicios pero no los encadena, y el editor no permite elegir el ejercicio pareado |
+| Tamaño del paquete | El fragmento principal pasa de 500 kB por el contenido de las fichas y las pantallas nuevas. Se puede partir por ruta con `React.lazy` si la carga inicial en celular resulta lenta |
