@@ -217,23 +217,24 @@ Lo que se entrega en Canvas el 22/05 y se presenta el 23/05.
 - **Banco de pruebas (DEC-038).**
 - **Interfaz en tuteo (DEC-039).**
 
-**Correcciones tras la primera prueba en celular (2026-09-23, en árbol de trabajo, sin commit):**
+**Correcciones tras las pruebas en celular (2026-09-23; DEC-040 a DEC-042 en `821abcb`, DEC-043 sin commit):**
 - **Nivelación con el acelerómetro (DEC-040).** El usuario vio el esqueleto entero inclinado al tomar el celular. Los `worldLandmarks` siguen a la cámara, no al suelo. `src/pose/deviceGravity.ts` endereza el esqueleto con la gravedad del acelerómetro antes de medir. Eso corrige también la inclinación de tronco, el arqueo lumbar y el balanceo del codo, que se medían contra una vertical falsa. El visor 3D dibuja tenues las partes del cuerpo que la cámara no ve.
 - **Sin emojis (DEC-041).** Filtros de grupos musculares solo con texto; logros con íconos propios en `src/ui/icons/AchievementIcon.tsx`.
+- **Calibración con la postura de pie (DEC-043).** En la segunda prueba, con el sensor activo, el cuerpo seguía inclinado 20°: error de profundidad del modelo, que el acelerómetro no ve. `src/pose/standingCalibration.ts` mide la desviación del eje tobillos-hombros cuando la persona está de pie y la descuenta. El panel 3D muestra cuántos grados corrige del modelo y del celular. En el mismo cambio, la sentadilla dejó de pedir "baja un poco más" durante la subida.
 - **Editor de rutinas con guardado explícito (DEC-042).** Borrador con "Cancelar" y "Crear rutina" o "Guardar cambios" en una barra fija. Salir con cambios pendientes pide confirmación, incluido el gesto de volver de Android. Se migró a `createHashRouter` para poder usar `useBlocker`.
 
 **Dependencias nuevas:** `three`, `@types/three` y `react-router-dom`, autorizadas explícitamente por el usuario tras plantearle el costo. Las correcciones del 2026-09-23 no agregaron ninguna.
 
-**Decisiones técnicas tomadas:** React, Vite, TypeScript, `@mediapipe/tasks-vision` (Tasks API), WASM vía CDN jsDelivr, onboarding CSS nativo, histéresis de umbral doble, overlay DOM con barra inferior, `SpeechSynthesis` para voz, `ArmTracker` y `ArmPressTracker`, conteo unificado OR+cooldown, PWA manual, SW network-first para HTML, HTTPS local con `@vitejs/plugin-basic-ssl`, delay 450 ms al cambiar de cámara, localStorage defensivo, análisis 3D con `worldLandmarks`, filtro One Euro, nivelación con acelerómetro, validación temporal con histéresis, fatiga por velocidad, Three.js con carga diferida, catálogo mixto, `createHashRouter`, tutorial con demo por cinemática directa, modo manual con reductor puro, editor con borrador, tuteo, sin emojis. Documentadas en `DECISIONS.md` (DEC-001 a DEC-042). Deploy: Vercel para el repositorio del equipo, Netlify para la copia del usuario.
+**Decisiones técnicas tomadas:** React, Vite, TypeScript, `@mediapipe/tasks-vision` (Tasks API), WASM vía CDN jsDelivr, onboarding CSS nativo, histéresis de umbral doble, overlay DOM con barra inferior, `SpeechSynthesis` para voz, `ArmTracker` y `ArmPressTracker`, conteo unificado OR+cooldown, PWA manual, SW network-first para HTML, HTTPS local con `@vitejs/plugin-basic-ssl`, delay 450 ms al cambiar de cámara, localStorage defensivo, análisis 3D con `worldLandmarks`, filtro One Euro, nivelación con acelerómetro, calibración de pie, validación temporal con histéresis, fatiga por velocidad, Three.js con carga diferida, catálogo mixto, `createHashRouter`, tutorial con demo por cinemática directa, modo manual con reductor puro, editor con borrador, tuteo, sin emojis. Documentadas en `DECISIONS.md` (DEC-001 a DEC-043). Deploy: Vercel para el repositorio del equipo, Netlify para la copia del usuario.
 
 **Estado de verificación (2026-09-23):**
 - `npm run build`, `npx tsc` y `npm run lint` pasan limpios.
-- `npm run test:motor`: 50 de 50. Suma 13 pruebas de nivelación: vertical recuperada con inclinación y giro combinados, signo del sensor de Android y de iPhone, lecturas descartadas con el celular acostado o sacudido, y fin de los avisos falsos de arqueo en el press.
+- `npm run test:motor`: 60 de 60. Incluye 13 pruebas de nivelación con el acelerómetro, 8 de calibración de pie con el error de profundidad del modelo, y 2 de los mensajes de la subida de la sentadilla.
 - Recorrido en navegador con vista de celular: editor nuevo (validación de nombre, confirmación al cancelar, guardado, retroceso bloqueado, descarte sin guardar), íconos de logros, filtros sin emojis y fila de sensores en el onboarding.
-- **Primera prueba en celular hecha por el usuario el 2026-09-23**, que originó DEC-040. **No verificado todavía:** la nivelación con los sensores reales de un iPhone y de un Android, y el conteo con movimientos reales.
+- **Pruebas en celular hechas por el usuario el 2026-09-23**, que originaron DEC-040 y DEC-043. En la segunda, el sensor funcionó en iPhone ("Nivelado") y quedó a la vista el error de profundidad del modelo. **No verificado todavía:** la calibración de pie con movimientos reales.
 
 **Próximo paso:**
-1. Subir las correcciones del 2026-09-23 y probar en celular, en iPhone y en Android, que el panel 3D muestre "Nivelado" y que el esqueleto quede derecho con el celular inclinado.
+1. Subir DEC-043 y probar en celular: de pie y de cuerpo entero, el panel 3D debe pasar a "Calibrado" y el esqueleto debe quedar derecho visto de costado. Si no, la captura del panel indica cuántos grados corrige de cada fuente.
 2. Calibrar con movimientos reales los umbrales de validación, fatiga y filtro.
 3. Decidir si integrar este trabajo con el repositorio del equipo.
 4. Decidir sobre la capa de IA aprendida. El cuello de botella es la data.

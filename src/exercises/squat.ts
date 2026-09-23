@@ -227,6 +227,14 @@ export class SquatTracker implements ExerciseTracker<SquatResult> {
       if (asymmetry > 0.18) {
         return { feedbackLevel: 'warning', feedbackMessage: 'Reparte el peso entre las dos piernas' };
       }
+      // Ya pasó el fondo y está subiendo. La fase sigue siendo 'squatting' hasta los 160°
+      // por histéresis, y antes esta rama pedía "baja un poco más" durante toda la subida,
+      // incluso con el usuario casi de pie. En la subida se juzga la profundidad alcanzada.
+      if (this.bottomFired) {
+        return this.minAngleSeen <= GOOD_DEPTH_ANGLE
+          ? { feedbackLevel: 'good', feedbackMessage: '¡Buena profundidad! Sube con los talones' }
+          : { feedbackLevel: 'warning', feedbackMessage: 'Sube. En la próxima, baja un poco más' };
+      }
       if (kneeAngle <= GOOD_DEPTH_ANGLE) {
         return { feedbackLevel: 'good', feedbackMessage: '¡Excelente profundidad!' };
       }

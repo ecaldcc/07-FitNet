@@ -3,6 +3,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { startCamera, stopCamera } from '../pose/camera';
 import { initPoseDetector, detectAndDraw } from '../pose/poseDetector';
 import { LandmarkSmoother } from '../pose/landmarkFilter';
+import { StandingCalibrator } from '../pose/standingCalibration';
+import { angleBetween } from '../geometry/vectors3d';
 import {
   DeviceGravityTracker, alignToGravity, motionPermissionRequired, requestMotionPermission,
 } from '../pose/deviceGravity';
@@ -121,6 +123,10 @@ export function CameraView() {
   const smootherRef = useRef(new LandmarkSmoother());
   // Acelerómetro: dice dónde está el suelo real para enderezar el esqueleto (DEC-040)
   const gravityRef = useRef(new DeviceGravityTracker());
+  // Postura de pie: corrige el error de profundidad del modelo que el sensor no ve (DEC-043)
+  const calibratorRef = useRef(new StandingCalibrator());
+  /** Grados corregidos en el último cuadro, para mostrarlos en el panel 3D. */
+  const tiltDiagRef = useRef<{ camera: number | null; model: number | null }>({ camera: null, model: null });
 
   // Referencia al ejercicio activo legible desde el bucle (evita cierre obsoleto)
   const activeExRef = useRef<TrackerId>(initialTracker);
@@ -180,6 +186,9 @@ export function CameraView() {
   // no por el navegador: si hay lecturas, está activa; si no llegan y el sistema exige
   // permiso (iOS), se ofrece un botón para darlo; si no, el equipo no tiene sensor.
   const [levelState, setLevelState] = useState<'waiting' | 'active' | 'needs-permission' | 'unavailable'>('waiting');
+  // Grados corregidos, redondeados. Se refrescan dos veces por segundo: suficiente para
+  // leerlos y sin provocar un render por cuadro.
+  const [tiltInfo, setTiltInfo] = useState<{ camera: number | null; model: number | null }>({ camera: null, model: null });
   useEffect(() => {
     const gravity = gravityRef.current;
     gravity.start();
@@ -190,6 +199,13 @@ export function CameraView() {
       } else if (performance.now() - startedAt > 1500) {
         setLevelState(motionPermissionRequired() ? 'needs-permission' : 'unavailable');
       }
+      const { camera, model } = tiltDiagRef.current;
+      const round = (v: number | null) => (v === null ? null : Math.round(v));
+      setTiltInfo(prev => (
+        prev.camera === round(camera) && prev.model === round(model)
+          ? prev
+          : { camera: round(camera), model: round(model) }
+      ));
     }, 500);
     return () => {
       window.clearInterval(id);
@@ -253,7 +269,17 @@ export function CameraView() {
             // Con lectura del acelerómetro, el esqueleto se endereza a la vertical real
             // antes de medir. Sin ella se sigue usando la vertical de la cámara.
             const down = gravityRef.current.worldDown(facingMode);
-            const world = down ? alignToGravity(smoothed, down) : smoothed;
+            const leveled = down ? alignToGravity(smoothed, down) : smoothed;
+            // La calibración aprende sobre el esqueleto ya nivelado: así solo captura el
+            // error de profundidad del modelo, no la inclinación del celular, y sigue
+            // valiendo si después se mueve el teléfono.
+            const calibrator = calibratorRef.current;
+            calibrator.update(leveled, timestamp);
+            const world = calibrator.apply(leveled);
+            tiltDiagRef.current = {
+              camera: down ? angleBetween(down, { x: 0, y: 1, z: 0 }) : null,
+              model: calibrator.correctionDeg,
+            };
 
             const result: AnyResult = (() => {
               if (ex === 'squat') return squatTrackerRef.current.update(world, timestamp);
@@ -316,10 +342,12 @@ export function CameraView() {
 
           if (ex === 'squat') {
             const r = result as SquatResult;
+            // El fondo se confirma cuando el usuario ya empezó a subir: pedirle en ese
+            // momento que baje más era una contradicción. Se evalúa la bajada que ya hizo.
             if (r.atBottom) {
-              speak(r.minAngleReached < GOOD_DEPTH_ANGLE
+              speak(r.minAngleReached <= GOOD_DEPTH_ANGLE
                 ? '¡Excelente profundidad!'
-                : 'Baja un poco más');
+                : 'La próxima, baja un poco más');
               lastSpeakTimeRef.current = performance.now();
             }
           } else if (ex === 'curl') {
@@ -393,6 +421,9 @@ export function CameraView() {
     setSwitchingCamera(true);
     setStatus('loading');
     setFacingMode(next);
+    // El error de profundidad del modelo depende de dónde está la cámara: con la otra
+    // cámara hay que volver a calibrar.
+    calibratorRef.current.reset();
   }
 
   const handleCloseTutorial = useCallback(() => {
@@ -493,7 +524,13 @@ export function CameraView() {
           <div className="pose3d-header">
             <span>Modelo 3D</span>
             <div className="pose3d-header-actions">
-              {levelState === 'active' && (
+              {levelState !== 'needs-permission' && tiltInfo.model !== null && (
+                <span className="level-pill" title="Vertical calibrada con tu postura de pie">
+                  <LevelIcon />
+                  Calibrado
+                </span>
+              )}
+              {levelState === 'active' && tiltInfo.model === null && (
                 <span className="level-pill" title="Enderezado con el sensor de movimiento">
                   <LevelIcon />
                   Nivelado
@@ -519,7 +556,14 @@ export function CameraView() {
           <Suspense fallback={<div className="pose3d-canvas pose3d-loading">Cargando 3D…</div>}>
             <Pose3DView ref={pose3DRef} className="pose3d-canvas" />
           </Suspense>
-          <p className="pose3d-hint">Arrastra para rotar · doble toque para reiniciar</p>
+          {/* Cuánto se corrige y de dónde viene: el celular (acelerómetro) o el modelo
+              (calibración de pie). Sirve al usuario para saber que la corrección está
+              activa, y a quien depure para distinguir las dos fuentes de inclinación. */}
+          <p className="pose3d-hint">
+            {tiltInfo.model !== null
+              ? `Corregido: modelo ${tiltInfo.model}°${tiltInfo.camera !== null ? ` · celular ${tiltInfo.camera}°` : ''}`
+              : 'Párate derecho, de cuerpo entero, para calibrar'}
+          </p>
         </div>
       )}
 

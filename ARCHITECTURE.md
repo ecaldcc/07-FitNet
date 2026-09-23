@@ -1,7 +1,7 @@
 # Arquitectura del proyecto
 
 > Documento vivo. Se actualiza a medida que el proyecto evoluciona.  
-> Última actualización: 2026-09-22 — Fase 6: análisis 3D, rutinas y perfil. Ver la sección final.
+> Última actualización: 2026-09-23 — Fase 6: análisis 3D, rutinas y perfil. Ver la sección final.
 
 ---
 
@@ -223,6 +223,9 @@ sigue siendo correcto hasta el detector; de ahí en adelante se bifurca.
                 ▼
            pose/deviceGravity.ts    acelerómetro: endereza a la vertical real (DEC-040)
                 │
+                ▼
+           pose/standingCalibration.ts   de pie: corrige el error de profundidad (DEC-043)
+                │
                 ├──► geometry/vectors3d.ts
                 │    calculateAngle3D, getBodyOrientation,
                 │    getTorsoInclination, asymmetryRatio
@@ -317,6 +320,13 @@ el esqueleto con la rotación mínima que la lleva al eje vertical. El signo de 
 difiere entre Android e iOS y se resuelve sin detectar el navegador. En iOS el permiso se
 pide desde un toque: en el onboarding, al cerrar el tutorial o con el botón "Nivelar".
 
+### `src/pose/standingCalibration.ts`
+Corrige el error de profundidad de MediaPipe, que rota el cuerpo entero como un bloque y
+que el acelerómetro no puede ver (DEC-043). De pie y con las piernas estiradas, el eje de
+tobillos a hombros es vertical; se mide su desviación en lo que estima el modelo y se
+descuenta. Aprende sobre el esqueleto ya nivelado por el sensor, así que solo captura el
+error del modelo. No aprende en el fondo de una sentadilla ni con la espalda arqueada.
+
 ### `src/pose/landmarkFilter.ts`
 Filtro One Euro por coordenada de cada landmark (DEC-036). Se aplica una sola vez en la
 vista de cámara, antes de los trackers y del visor, así que todo lo que mide trabaja
@@ -368,6 +378,12 @@ máquina de estados era puramente posicional y no necesitaba saber cuándo ocurr
 cuadro. La validación temporal y la detección de fatiga dependen de esa marca, y pasarla
 explícitamente en vez de leer `performance.now()` dentro del tracker mantiene a los
 trackers deterministas y testeables.
+
+### El fondo de la sentadilla ya no se compara contra el cuadro anterior
+El diagrama "Detección de fondo en SquatTracker" de la sección original describe el criterio
+viejo, que exigía subir 2° entre dos cuadros y no contaba nada a 60 fps. Ahora el fondo se
+confirma cuando el ángulo sube 8° sobre el mínimo acumulado (DEC-034). Durante la subida,
+el mensaje evalúa la profundidad alcanzada en lugar de pedir bajar más (DEC-043).
 
 ### Separación entre reiniciar y empezar serie nueva
 `reset` borra todo, incluido el contador de repeticiones. `startNewSet` reinicia solo la

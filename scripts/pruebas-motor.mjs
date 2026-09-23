@@ -38,6 +38,7 @@ try {
     join(root, 'src/pose/landmarkFilter.ts'),
     join(root, 'src/routines/manualWorkout.ts'),
     join(root, 'src/pose/deviceGravity.ts'),
+    join(root, 'src/pose/standingCalibration.ts'),
     '--outDir', out, '--rootDir', join(root, 'src'),
     '--module', 'commonjs', '--moduleResolution', 'node10', '--ignoreDeprecations', '6.0',
     '--target', 'es2022', '--skipLibCheck', '--esModuleInterop',
@@ -58,6 +59,7 @@ const { LandmarkSmoother } = load('pose/landmarkFilter.js');
 const { buildPlan, initialState, workoutReducer, REST_PAUSE_MS } = load('routines/manualWorkout.js');
 const { alignToGravity, screenDownToWorld, DeviceGravityTracker } = load('pose/deviceGravity.js');
 const { getTorsoInclination, LM } = load('geometry/vectors3d.js');
+const { StandingCalibrator, isStandingStraight } = load('pose/standingCalibration.js');
 
 const results = [];
 const check = (group, name, ok, detail = '') => results.push({ group, name, ok: !!ok, detail });
@@ -255,6 +257,119 @@ const torso = w => getTorsoInclination(w[LM.LEFT_SHOULDER], w[LM.RIGHT_SHOULDER]
   check(G, 'press con el celular inclinado 32°: nivelado no da avisos falsos y cuenta igual',
     after.falseArch === 0 && after.reps === before.reps && after.reps >= 4,
     `${after.falseArch} cuadros con aviso, ${after.reps} repeticiones`);
+}
+
+// ═══════════════════════════════ Calibración de pie ═══════════════════════════════
+//
+// Simula el error visto en la primera prueba real: MediaPipe estima la profundidad mal y
+// entrega el cuerpo entero rotado 20°, con el celular derecho. El acelerómetro no ve ese
+// error; la calibración con la postura de pie sí.
+
+const CAL = 'calibración de pie';
+const MODEL_TILT = 20;
+
+check(CAL, 'de pie con piernas estiradas cuenta como postura de calibración',
+  isStandingStraight(DEMOS.sentadilla.pose(0)) && isStandingStraight(tiltPose(DEMOS.sentadilla.pose(0), MODEL_TILT, 0)));
+check(CAL, 'el fondo de la sentadilla no cuenta como postura de calibración',
+  !isStandingStraight(DEMOS.sentadilla.pose(0.8)));
+
+/** Sentadilla completa con el error del modelo; opcionalmente calibrada. */
+function runTiltedSquat(calibrate) {
+  const def = DEMOS.sentadilla;
+  const tracker = new SquatTracker();
+  const smoother = new LandmarkSmoother();
+  const calibrator = new StandingCalibrator();
+  let t = 0, falseLean = 0, res;
+  const cycleMs = def.phases.reduce((a, p) => a + p.durationMs, 0);
+  const frames = Math.round((cycleMs * 5) / (1000 / 30));
+  for (let f = 0; f < frames; f++) {
+    const { p } = sampleDemo(def, t);
+    let w = smoother.smooth(tiltPose(def.pose(p), MODEL_TILT, 0), t);
+    if (calibrate) {
+      calibrator.update(w, t);
+      w = calibrator.apply(w);
+    }
+    res = tracker.update(w, t);
+    if (/Pecho arriba/.test(res.feedbackMessage)) falseLean++;
+    t += 1000 / 30;
+  }
+  for (let f = 0; f < 30; f++) {
+    let w = smoother.smooth(tiltPose(def.pose(0), MODEL_TILT, 0), t);
+    if (calibrate) { calibrator.update(w, t); w = calibrator.apply(w); }
+    res = tracker.update(w, t);
+    t += 1000 / 30;
+  }
+  return { falseLean, reps: res.reps, correction: calibrator.correctionDeg };
+}
+
+{
+  const before = runTiltedSquat(false);
+  const after = runTiltedSquat(true);
+  check(CAL, `modelo inclinado ${MODEL_TILT}°: sin calibrar da avisos falsos de espalda`,
+    before.falseLean > 0, `${before.falseLean} cuadros con aviso`);
+  check(CAL, `modelo inclinado ${MODEL_TILT}°: calibrado no da avisos falsos y cuenta 5`,
+    after.falseLean === 0 && after.reps === 5, `${after.falseLean} cuadros con aviso, ${after.reps} repeticiones`);
+  check(CAL, 'la calibración mide el error del modelo y se mantiene durante las repeticiones',
+    after.correction !== null && Math.abs(after.correction - MODEL_TILT) < 3,
+    `corrección final ${after.correction?.toFixed(1)}°`);
+}
+{
+  const cal = new StandingCalibrator();
+  for (let f = 0, t = 0; f < 90; f++, t += 33) cal.update(tiltPose(DEMOS.sentadilla.pose(0.8), MODEL_TILT, 0), t);
+  check(CAL, 'sin estar de pie no se calibra', !cal.calibrated);
+}
+{
+  const cal = new StandingCalibrator();
+  for (let f = 0, t = 0; f < 90; f++, t += 33) cal.update(tiltPose(DEMOS.sentadilla.pose(0), 50, 0), t);
+  check(CAL, 'una desviación de 50° no se toma como error del modelo', !cal.calibrated);
+}
+{
+  // Con el celular inclinado y además el error del modelo, las dos correcciones se suman bien.
+  const cal = new StandingCalibrator();
+  const phoneDown = rotateCamera({ x: 0, y: 1, z: 0 }, 15, 0);
+  let last;
+  for (let f = 0, t = 0; f < 60; f++, t += 33) {
+    const seenByCamera = tiltPose(tiltPose(DEMOS.sentadilla.pose(0), MODEL_TILT, 0), 15, 0);
+    const leveled = alignToGravity(seenByCamera, phoneDown);
+    cal.update(leveled, t);
+    last = cal.apply(leveled);
+  }
+  // La postura de pie de la demo ya tiene unos 3° de tronco propios: se compara contra ella.
+  const truth = torso(DEMOS.sentadilla.pose(0));
+  const err = Math.abs(torso(last) - truth);
+  check(CAL, 'celular inclinado 15° más modelo inclinado 20°: el cuerpo queda derecho',
+    err < 1 && Math.abs(cal.correctionDeg - MODEL_TILT) < 1,
+    `error de tronco ${err.toFixed(2)}°, corrección del modelo ${cal.correctionDeg?.toFixed(1)}°`);
+}
+
+// ═══════════════════════════════ Mensajes de la sentadilla ═══════════════════════════════
+
+/** Recorre sentadillas y junta los mensajes que se mostraron durante la subida. */
+function ascentMessages(pMax) {
+  const def = DEMOS.sentadilla;
+  const phases = def.phases.map(ph => ({ ...ph, from: ph.from * pMax, to: ph.to * pMax }));
+  const local = { ...def, phases };
+  const tracker = new SquatTracker();
+  const smoother = new LandmarkSmoother();
+  const messages = new Set();
+  let ascending = false, t = 0;
+  const cycleMs = phases.reduce((a, p) => a + p.durationMs, 0);
+  for (let f = 0; f < Math.round((cycleMs * 3) / (1000 / 30)); f++) {
+    const { p } = sampleDemo(local, t);
+    const res = tracker.update(smoother.smooth(def.pose(p), t), t);
+    if (res.atBottom) ascending = true;
+    if (res.phase === 'standing') ascending = false;
+    if (ascending) messages.add(res.feedbackMessage);
+    t += 1000 / 30;
+  }
+  return [...messages];
+}
+{
+  const deep = ascentMessages(1);
+  check('mensajes de la sentadilla', 'al subir nunca pide bajar más', !deep.includes('Baja un poco más'), deep.join(' | '));
+  const shallow = ascentMessages(0.85);
+  check('mensajes de la sentadilla', 'una sentadilla corta recibe la sugerencia para la próxima',
+    shallow.some(m => /próxima/.test(m)) && !shallow.includes('Baja un poco más'), shallow.join(' | '));
 }
 
 // ═══════════════════════════════ Modo manual ═══════════════════════════════

@@ -455,6 +455,7 @@ standing     → voz dice solo el número de rep
 **Salvaguardas:** Se descartan las lecturas con el teléfono en movimiento brusco y con el teléfono casi horizontal. Tampoco se corrigen inclinaciones de más de 60°. Sin sensor, la app mide como antes.  
 **Permiso en iOS:** Safari exige pedirlo desde un toque, antes de cualquier espera. Se pide en el onboarding, antes que la cámara; al cerrar el tutorial en la vista de cámara; y con un botón "Nivelar" en el panel 3D si hace falta. En Android no requiere permiso. El panel muestra "Nivelado" cuando la corrección está activa.  
 **Partes estimadas:** El visor dibuja tenues y sin articulaciones los huesos cuyos extremos tienen visibilidad menor a 0.5, el mismo umbral que usan los trackers.  
+**Actualización 2026-09-23:** En la prueba siguiente el sensor funcionaba ("Nivelado") y el cuerpo seguía inclinado. La causa restante era un error de profundidad del modelo, que se corrige en DEC-043.  
 **Verificado:** 13 pruebas nuevas en el banco. Recupera la vertical con inclinaciones de hasta 30° combinadas con giro, interpreta bien el signo de Android y de iPhone, y elimina los avisos falsos de arqueo en el press. **No verificado con sensores reales:** falta confirmar en un iPhone y en un Android que el signo y los ejes se comportan como en el modelo.
 
 ---
@@ -475,3 +476,21 @@ standing     → voz dice solo el número de rep
 **Cambio de enrutador:** Para bloquear la navegación hace falta `useBlocker`, que solo existe con el enrutador de datos de React Router. Se migró de `HashRouter` a `createHashRouter`. El enrutado por fragmento de DEC-032 no cambia.  
 **Editor a pantalla completa:** El editor sale del contenedor con barra de navegación, igual que las pantallas de entrenamiento. Dos barras apiladas abajo no dejan espacio en un celular, y editar es una tarea que se termina o se cancela.  
 **Verificado en navegador:** Guardar sin nombre muestra el error. Cancelar con cambios pide confirmación, y "Seguir editando" conserva el borrador. Crear persiste la rutina y vuelve a la lista sin preguntar. El retroceso del historial queda bloqueado con cambios pendientes. Descartar no guarda nada.
+
+---
+
+## DEC-043 · Calibración de la vertical con la postura de pie
+**Fecha:** 2026-09-23  
+**Contexto:** En la segunda prueba en celular, con DEC-040 activo y el panel mostrando "Nivelado", el visor 3D seguía mostrando el cuerpo entero inclinado unos 20°. En la imagen de la cámara el usuario estaba derecho, de frente, y el celular parecía vertical. Visto de costado en el visor, el cuerpo era una línea recta inclinada de pies a cabeza.  
+**Causa:** No es una inclinación del celular, que el acelerómetro ya corrige, sino un error de profundidad del modelo. Con una sola cámara, la profundidad es lo que peor estima MediaPipe: a una persona de frente suele ubicarle los pies más cerca o más lejos de la cámara que la cabeza, y el esqueleto entero queda rotado como un bloque. El acelerómetro no puede ver ese error. Afecta las mismas medidas que DEC-040: el banco de pruebas muestra avisos falsos de "Pecho arriba" en la sentadilla con 20° de error del modelo.  
+**Alternativas consideradas:**  
+(a) Subir los umbrales de inclinación de tronco y de arqueo — esconde el error sin corregirlo, y deja de detectar las malas posturas reales.  
+(b) Pedirle al usuario una calibración explícita al empezar — funciona, pero agrega un paso cada vez que se abre la cámara.  
+(c) Calibración automática con la postura de pie.  
+**Decisión:** Opción (c), en `src/pose/standingCalibration.ts`. De pie y con las piernas estiradas, el eje de tobillos a hombros es vertical en la realidad. Cuando la persona está así, se mide cuánto se desvía ese eje en lo que estima el modelo, se suaviza, y se descuenta de todos los cuadros siguientes. Pasa sola al comienzo de cada serie de sentadillas y entre repeticiones.  
+**Condiciones para aprender:** hombros, caderas, rodillas y tobillos visibles con 0.6 o más; rodillas por encima de 160°; ángulo hombro-cadera-rodilla por encima de 155°; y desviación menor a 35°. En el fondo de una sentadilla, o con la espalda arqueada, no se actualiza. Así la inclinación del tronco se sigue midiendo, contra la postura de pie de la misma persona frente a la misma cámara.  
+**Orden en el procesamiento:** filtro de temblor, acelerómetro, calibración, trackers. La calibración aprende sobre el esqueleto ya nivelado por el sensor, así que captura solo el error del modelo y sigue valiendo si después se mueve el celular. Se reinicia al cambiar de cámara.  
+**Diagnóstico en pantalla:** El panel 3D muestra "Calibrado" y cuántos grados corrige del modelo y del celular. Sirve para saber que está activa, y para distinguir las dos fuentes si una prueba vuelve a mostrar el cuerpo inclinado. Sin calibración, indica cómo lograrla: pararse derecho, de cuerpo entero.  
+**Limitación:** Necesita los tobillos a la vista. En curl y press con encuadre de medio cuerpo solo se aplica el acelerómetro.  
+**Error relacionado, corregido en el mismo cambio:** La captura de la prueba mostraba "Baja un poco más" con el usuario casi de pie. En la sentadilla, la fase "abajo" dura hasta que la rodilla supera 160°, y durante toda la subida, entre 90° y 160°, se pedía bajar más. Venía del código original. Ahora, después del fondo, el mensaje evalúa la profundidad que se alcanzó. La voz, que decía lo mismo justo al empezar a subir, ahora dice "La próxima, baja un poco más".  
+**Verificado:** 10 pruebas nuevas en el banco, 60 de 60 en total. La calibración mide los 20° de error del modelo con menos de 3° de desvío y se mantiene estable durante cinco repeticiones. Elimina los avisos falsos de espalda sin perder repeticiones y no aprende de posturas que no son de pie. Con celular y modelo inclinados a la vez, deja el tronco a menos de 1° de la verdad. Durante la subida ya no se pide bajar más. **No verificado todavía:** con movimientos reales en el celular.
