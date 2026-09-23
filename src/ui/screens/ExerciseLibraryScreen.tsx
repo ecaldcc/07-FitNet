@@ -48,7 +48,7 @@ export function ExerciseLibraryScreen() {
             className={`group-chip${group === m.id ? ' active' : ''}`}
             onClick={() => setGroup(m.id)}
           >
-            {m.emoji} {m.label}
+            {m.label}
           </button>
         ))}
       </div>

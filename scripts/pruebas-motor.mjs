@@ -37,6 +37,7 @@ try {
     join(root, 'src/exercises/demoPoses.ts'),
     join(root, 'src/pose/landmarkFilter.ts'),
     join(root, 'src/routines/manualWorkout.ts'),
+    join(root, 'src/pose/deviceGravity.ts'),
     '--outDir', out, '--rootDir', join(root, 'src'),
     '--module', 'commonjs', '--moduleResolution', 'node10', '--ignoreDeprecations', '6.0',
     '--target', 'es2022', '--skipLibCheck', '--esModuleInterop',
@@ -55,6 +56,8 @@ const { BicepCurlTracker } = load('exercises/bicepCurl.js');
 const { ShoulderPressTracker } = load('exercises/shoulderPress.js');
 const { LandmarkSmoother } = load('pose/landmarkFilter.js');
 const { buildPlan, initialState, workoutReducer, REST_PAUSE_MS } = load('routines/manualWorkout.js');
+const { alignToGravity, screenDownToWorld, DeviceGravityTracker } = load('pose/deviceGravity.js');
+const { getTorsoInclination, LM } = load('geometry/vectors3d.js');
 
 const results = [];
 const check = (group, name, ok, detail = '') => results.push({ group, name, ok: !!ok, detail });
@@ -139,6 +142,119 @@ for (const id of Object.keys(MAKERS)) {
   check(id, 'subida cada vez más lenta eleva la fatiga',
     tired.reps >= 6 && tired.fatigue.level !== 'fresh',
     `fatiga ${tired.fatigue.level} (${tired.fatigue.score}), caída de velocidad ${tired.fatigue.velocityDropPercent}%`);
+}
+
+// ═══════════════════════════════ Nivelación con el acelerómetro ═══════════════════════════════
+//
+// Modelo físico de la prueba: un celular en vertical con la parte de arriba inclinada
+// hacia atrás `pitch` grados y girado como volante `roll` grados. Se calcula qué "abajo"
+// mediría el acelerómetro en ejes de pantalla, y qué verían los worldLandmarks, que
+// siguen a la cámara. Si la cadena pantalla → cámara → rotación es coherente, alinear
+// debe devolver exactamente la pose original.
+
+const G = 'nivelación';
+const DEG = Math.PI / 180;
+
+/** Rotación de un punto: primero `roll` sobre el eje de la vista, después `pitch` sobre el eje horizontal. */
+function rotateCamera(p, pitchDeg, rollDeg) {
+  const r = rollDeg * DEG, t = pitchDeg * DEG;
+  // roll alrededor de z (eje de la vista)
+  let x = p.x * Math.cos(r) - p.y * Math.sin(r);
+  let y = p.x * Math.sin(r) + p.y * Math.cos(r);
+  let z = p.z;
+  // pitch alrededor de x: con t > 0 la cámara mira hacia abajo, y "abajo" gana componente +z
+  const y2 = y * Math.cos(t) - z * Math.sin(t);
+  const z2 = y * Math.sin(t) + z * Math.cos(t);
+  return { x, y: y2, z: z2 };
+}
+const tiltPose = (world, pitch, roll) => world.map(p => ({ ...rotateCamera(p, pitch, roll), visibility: p.visibility }));
+const torso = w => getTorsoInclination(w[LM.LEFT_SHOULDER], w[LM.RIGHT_SHOULDER], w[LM.LEFT_HIP], w[LM.RIGHT_HIP]);
+
+{
+  const original = DEMOS.sentadilla.pose(0.8);
+  const truth = torso(original);
+  for (const [pitch, roll] of [[25, 0], [-20, 0], [15, 12], [30, -8]]) {
+    const tilted = tiltPose(original, pitch, roll);
+    // "Abajo" real visto desde la cámara inclinada: (0,1,0) rotado igual que el cuerpo.
+    const downWorld = rotateCamera({ x: 0, y: 1, z: 0 }, pitch, roll);
+    const fixed = alignToGravity(tilted, downWorld);
+    const errBefore = Math.abs(torso(tilted) - truth);
+    const errAfter = Math.abs(torso(fixed) - truth);
+    // La gravedad fija la vertical, pero no hacia dónde mira la persona alrededor de ella:
+    // ese giro no se puede recuperar ni hace falta. Lo que sí debe coincidir es la altura
+    // de cada punto y su distancia horizontal al centro de la cadera.
+    const maxPointError = Math.max(...fixed.map((p, i) => Math.max(
+      Math.abs(p.y - original[i].y),
+      Math.abs(Math.hypot(p.x, p.z) - Math.hypot(original[i].x, original[i].z)),
+    )));
+    check(G, `celular inclinado ${pitch}° y girado ${roll}°: el esqueleto vuelve a la vertical`,
+      errAfter < 0.5 && maxPointError < 1e-6,
+      `tronco: error ${errBefore.toFixed(1)}° sin corregir, ${errAfter.toFixed(2)}° corregido`);
+  }
+}
+
+// Coherencia entre ejes de pantalla y de cámara: el "abajo" que entrega el sensor,
+// pasado a ejes de la cámara, debe coincidir con el "abajo" que ve la cámara.
+{
+  for (const pitch of [0, 20, -15]) {
+    // Celular con la parte de arriba inclinada hacia atrás: la pantalla mira un poco hacia arriba,
+    // así que la gravedad gana componente hacia adentro de la pantalla (z negativo).
+    const screenDown = { x: 0, y: -Math.cos(pitch * DEG), z: -Math.sin(pitch * DEG) };
+    const rear = screenDownToWorld(screenDown, 'environment');
+    const expected = rotateCamera({ x: 0, y: 1, z: 0 }, pitch, 0);
+    const err = Math.hypot(rear.x - expected.x, rear.y - expected.y, rear.z - expected.z);
+    check(G, `cámara trasera con ${pitch}° de inclinación: ejes coherentes`, err < 1e-9, `desvío ${err.toExponential(1)}`);
+  }
+}
+
+// El signo de la lectura difiere entre Android e iOS; el rastreador debe entender los dos.
+{
+  const listeners = {};
+  globalThis.window = { DeviceMotionEvent: function () {}, addEventListener: (n, f) => { listeners[n] = f; }, removeEventListener: () => {} };
+  for (const [name, gy] of [['Android', 9.81], ['iPhone', -9.81]]) {
+    const tracker = new DeviceGravityTracker();
+    tracker.start();
+    listeners.devicemotion({ accelerationIncludingGravity: { x: 0, y: gy, z: 0 } });
+    const d = tracker.worldDown('environment');
+    tracker.stop();
+    check(G, `lectura de ${name} con el celular en vertical da "abajo" correcto`,
+      d && Math.abs(d.y - 1) < 1e-9, JSON.stringify(d));
+  }
+  const tracker = new DeviceGravityTracker();
+  tracker.start();
+  listeners.devicemotion({ accelerationIncludingGravity: { x: 0, y: 0.5, z: 9.8 } });
+  check(G, 'celular acostado sobre la mesa: no se corrige nada', tracker.worldDown('environment') === null);
+  listeners.devicemotion({ accelerationIncludingGravity: { x: 0, y: 25, z: 0 } });
+  check(G, 'sacudida brusca: la lectura se descarta', tracker.worldDown('environment') === null);
+  tracker.stop();
+  delete globalThis.window;
+}
+
+// Consecuencia práctica: con el celular inclinado, el press avisaba un arqueo que no existe.
+{
+  const def = DEMOS['press-hombro'];
+  const runPress = align => {
+    const tracker = new ShoulderPressTracker();
+    const smoother = new LandmarkSmoother();
+    const down = rotateCamera({ x: 0, y: 1, z: 0 }, 32, 0);
+    let t = 0, falseArch = 0, res;
+    for (let f = 0; f < 5 * 111; f++) {
+      const { p } = sampleDemo(def, t);
+      let w = smoother.smooth(tiltPose(def.pose(p), 32, 0), t);
+      if (align) w = alignToGravity(w, down);
+      res = tracker.update(w, t);
+      if (/arqueando/.test(res.feedbackMessage)) falseArch++;
+      t += 1000 / 30;
+    }
+    return { falseArch, reps: res.reps };
+  };
+  const before = runPress(false);
+  const after = runPress(true);
+  check(G, 'press con el celular inclinado 32°: sin nivelar da aviso falso de arqueo', before.falseArch > 0,
+    `${before.falseArch} cuadros con aviso`);
+  check(G, 'press con el celular inclinado 32°: nivelado no da avisos falsos y cuenta igual',
+    after.falseArch === 0 && after.reps === before.reps && after.reps >= 4,
+    `${after.falseArch} cuadros con aviso, ${after.reps} repeticiones`);
 }
 
 // ═══════════════════════════════ Modo manual ═══════════════════════════════

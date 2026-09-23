@@ -3,6 +3,9 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { startCamera, stopCamera } from '../pose/camera';
 import { initPoseDetector, detectAndDraw } from '../pose/poseDetector';
 import { LandmarkSmoother } from '../pose/landmarkFilter';
+import {
+  DeviceGravityTracker, alignToGravity, motionPermissionRequired, requestMotionPermission,
+} from '../pose/deviceGravity';
 import { SquatTracker, GOOD_DEPTH_ANGLE } from '../exercises/squat';
 import { BicepCurlTracker, GOOD_FORM_ANGLE } from '../exercises/bicepCurl';
 import { ShoulderPressTracker, GOOD_LOCKOUT_ANGLE } from '../exercises/shoulderPress';
@@ -70,6 +73,17 @@ function describeCameraError(err: unknown): string {
   try { return JSON.stringify(err); } catch { return String(err); }
 }
 
+/** Nivel de burbuja: indica que el esqueleto se endereza con el sensor de movimiento. */
+function LevelIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="8" width="20" height="8" rx="4" />
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+      <path d="M9 8v8M15 8v8" />
+    </svg>
+  );
+}
+
 function repPhrase(n: number): string {
   if (n === 1) return 'Una';
   if (n % 10 === 0) return `${n}. ¡Excelente ritmo!`;
@@ -105,6 +119,8 @@ export function CameraView() {
   const pressTrackerRef = useRef(new ShoulderPressTracker());
   // Filtro de temblor de los landmarks: todo lo que mide pasa primero por aquí (DEC-036)
   const smootherRef = useRef(new LandmarkSmoother());
+  // Acelerómetro: dice dónde está el suelo real para enderezar el esqueleto (DEC-040)
+  const gravityRef = useRef(new DeviceGravityTracker());
 
   // Referencia al ejercicio activo legible desde el bucle (evita cierre obsoleto)
   const activeExRef = useRef<TrackerId>(initialTracker);
@@ -160,6 +176,33 @@ export function CameraView() {
   useEffect(() => { show3DRef.current = show3D; }, [show3D]);
   useEffect(() => { pausedRef.current = tutorialOpen; }, [tutorialOpen]);
 
+  // Estado de la nivelación con el acelerómetro. Se decide por lo que llega del sensor y
+  // no por el navegador: si hay lecturas, está activa; si no llegan y el sistema exige
+  // permiso (iOS), se ofrece un botón para darlo; si no, el equipo no tiene sensor.
+  const [levelState, setLevelState] = useState<'waiting' | 'active' | 'needs-permission' | 'unavailable'>('waiting');
+  useEffect(() => {
+    const gravity = gravityRef.current;
+    gravity.start();
+    const startedAt = performance.now();
+    const id = window.setInterval(() => {
+      if (gravity.hasReading) {
+        setLevelState('active');
+      } else if (performance.now() - startedAt > 1500) {
+        setLevelState(motionPermissionRequired() ? 'needs-permission' : 'unavailable');
+      }
+    }, 500);
+    return () => {
+      window.clearInterval(id);
+      gravity.stop();
+    };
+  }, []);
+
+  /** iOS solo concede el permiso si se pide directo desde un toque, antes de cualquier espera. */
+  const askMotionPermission = useCallback(() => {
+    if (!motionPermissionRequired() || gravityRef.current.hasReading) return;
+    void requestMotionPermission();
+  }, []);
+
   useEffect(() => {
     if (!navigator.mediaDevices) return;
 
@@ -206,7 +249,11 @@ export function CameraView() {
 
           if (frame.world.length > 0) {
             const ex = activeExRef.current;
-            const world = smootherRef.current.smooth(frame.world[0], timestamp);
+            const smoothed = smootherRef.current.smooth(frame.world[0], timestamp);
+            // Con lectura del acelerómetro, el esqueleto se endereza a la vertical real
+            // antes de medir. Sin ella se sigue usando la vertical de la cámara.
+            const down = gravityRef.current.worldDown(facingMode);
+            const world = down ? alignToGravity(smoothed, down) : smoothed;
 
             const result: AnyResult = (() => {
               if (ex === 'squat') return squatTrackerRef.current.update(world, timestamp);
@@ -349,9 +396,12 @@ export function CameraView() {
   }
 
   const handleCloseTutorial = useCallback(() => {
+    // Cerrar el tutorial es un toque del usuario: el momento en que iOS acepta pedir
+    // el permiso del sensor sin que haga falta otro botón.
+    askMotionPermission();
     markTutorialSeen(TRACKER_TO_EXERCISE[activeExRef.current]);
     setTutorialOpen(false);
-  }, []);
+  }, [askMotionPermission]);
 
   /** Cierra la serie en curso, la registra y reinicia la línea base de fatiga. */
   const handleFinishSet = useCallback(() => {
@@ -442,11 +492,29 @@ export function CameraView() {
         <div className="pose3d-panel">
           <div className="pose3d-header">
             <span>Modelo 3D</span>
-            <button
-              className="pose3d-close"
-              onClick={() => setShow3D(false)}
-              aria-label="Ocultar modelo 3D"
-            >×</button>
+            <div className="pose3d-header-actions">
+              {levelState === 'active' && (
+                <span className="level-pill" title="Enderezado con el sensor de movimiento">
+                  <LevelIcon />
+                  Nivelado
+                </span>
+              )}
+              {levelState === 'needs-permission' && (
+                <button
+                  className="level-pill action"
+                  onClick={askMotionPermission}
+                  title="Usar el sensor de movimiento para corregir la inclinación del celular"
+                >
+                  <LevelIcon />
+                  Nivelar
+                </button>
+              )}
+              <button
+                className="pose3d-close"
+                onClick={() => setShow3D(false)}
+                aria-label="Ocultar modelo 3D"
+              >×</button>
+            </div>
           </div>
           <Suspense fallback={<div className="pose3d-canvas pose3d-loading">Cargando 3D…</div>}>
             <Pose3DView ref={pose3DRef} className="pose3d-canvas" />

@@ -192,7 +192,7 @@ Lo que se entrega en Canvas el 22/05 y se presenta el 23/05.
 
 > **Esta sección se actualiza cada vez que el proyecto avanza.** Claude Code debe mantenerla viva.
 
-**Última actualización:** 2026-09-22
+**Última actualización:** 2026-09-23
 
 **Directorio de trabajo:** `C:\Users\Edwar\Documents\entrenador-personal-ia`. El directorio histórico `C:\Dev-AI\entrenador-personal-ia` (DEC-007) corresponde a la máquina donde se desarrolló la entrega del curso; este es un clon posterior del repositorio de GitHub. El criterio de DEC-007, mantenerse fuera de OneDrive, se sigue cumpliendo.
 
@@ -200,33 +200,41 @@ Lo que se entrega en Canvas el 22/05 y se presenta el 23/05.
 
 **Lo entregado en el curso (sin cambios):** los 3 ejercicios operativos, PWA instalable, deploy en Vercel y la documentación de Canvas en `docs/`.
 
-**Lo agregado en la fase 6 (en árbol de trabajo, sin commit todavía):**
-- **Análisis 3D real (DEC-026).** El motor pasó de `landmarks` (proyección de pantalla) a `worldLandmarks` (coordenadas métricas 3D, independientes de la cámara), que MediaPipe ya entregaba y la app descartaba. `src/geometry/vectors3d.ts` con `calculateAngle3D` por producto punto, orientación corporal, inclinación de tronco y asimetría. Habilita validaciones antes imposibles: inclinación en sentadilla, arqueo lumbar en press y desplazamiento de codo en curl.
-- **Filtro de temblor (DEC-036).** Filtro One Euro sobre los landmarks antes de cualquier cálculo, en `src/pose/landmarkFilter.ts`.
-- **Validación temporal de repeticiones (DEC-027, corregida en DEC-035).** Una repetición exige recorrido, duración, fase de esfuerzo mínima y continuidad. La continuidad se mide con cambios de dirección con histéresis. El motivo del rechazo se informa por texto y por voz.
-- **Sentadilla sin dependencia de la velocidad de cuadros (DEC-034).** El criterio original no contaba nada a 60 fps.
-- **Detección de fatiga (DEC-028, corregida en DEC-035).** Caída de velocidad concéntrica, pérdida de recorrido y asimetría contra una línea base de 3 repeticiones.
-- **Visor 3D con Three.js (DEC-029).** Rotable con el dedo, carga diferida, pies anclados al suelo.
-- **Catálogo y rutinas (DEC-030).** 60 ejercicios en 11 grupos musculares. Rutinas con días de la semana, dificultad por ejercicio y métodos rest-pause, dropset y superserie. Tres plantillas sembradas, incluida empuje/tirón/pierna.
-- **Tutorial por ejercicio (DEC-033).** Ficha escrita para los 60 y demo 3D animada en los 3 con cámara. Se abre sola la primera vez con cada ejercicio de cámara. Biblioteca navegable por grupo muscular.
-- **Modo manual (DEC-037).** Los 57 ejercicios sin cámara se ejecutan con contador, temporizador y descansos, con los cuatro métodos, y quedan en el historial.
-- **Perfil (DEC-031).** Objetivos, progreso, racha, logros e historial, todo derivado del historial de sesiones.
-- **Navegación (DEC-032).** Siete pantallas con `HashRouter` y contexto de React. Las sesiones se registran con `recordSession` del contexto.
-- **Banco de pruebas (DEC-038).** `npm run test:motor`, 37 pruebas sin cámara ni dependencias nuevas.
-- **Interfaz en tuteo (DEC-039),** incluidos los mensajes de error de cámara, que el navegador entregaba en inglés.
+**Repositorios:** `origin` es `github.com/ecaldcc/entrenador-personal-ia`, la copia personal del usuario, desplegada en Netlify desde `main`. `upstream` es `github.com/govandoh/entrenador-personal-ia`, el repositorio del equipo, que avanzó en paralelo con otra dirección técnica (monorepo con pnpm, Supabase, pruebas de referencia con grabaciones) y con una numeración de decisiones que choca con la de este repositorio a partir de DEC-026. Integrar ambos sigue pendiente y es una decisión del usuario.
 
-**Dependencias nuevas:** `three`, `@types/three` y `react-router-dom`, autorizadas explícitamente por el usuario tras plantearle el costo.
+**Lo agregado en la fase 6 (en `main` desde el commit `d456e95`):**
+- **Análisis 3D real (DEC-026).** El motor pasó de `landmarks` (proyección de pantalla) a `worldLandmarks` (coordenadas métricas 3D), que MediaPipe ya entregaba y la app descartaba. `src/geometry/vectors3d.ts` con `calculateAngle3D` por producto punto, orientación corporal, inclinación de tronco y asimetría.
+- **Filtro de temblor (DEC-036).** Filtro One Euro sobre los landmarks antes de cualquier cálculo.
+- **Validación temporal de repeticiones (DEC-027, corregida en DEC-035).** Recorrido, duración, fase de esfuerzo mínima y continuidad con histéresis.
+- **Sentadilla sin dependencia de la velocidad de cuadros (DEC-034).**
+- **Detección de fatiga (DEC-028, corregida en DEC-035).**
+- **Visor 3D con Three.js (DEC-029).**
+- **Catálogo y rutinas (DEC-030).** 60 ejercicios en 11 grupos musculares, métodos rest-pause, dropset y superserie, tres plantillas.
+- **Tutorial por ejercicio (DEC-033).** Ficha para los 60 y demo 3D animada en los 3 con cámara.
+- **Modo manual (DEC-037)** para los 57 ejercicios sin cámara.
+- **Perfil (DEC-031).**
+- **Navegación (DEC-032).**
+- **Banco de pruebas (DEC-038).**
+- **Interfaz en tuteo (DEC-039).**
 
-**Decisiones técnicas tomadas:** React, Vite, TypeScript, `@mediapipe/tasks-vision` (Tasks API), WASM vía CDN jsDelivr, onboarding CSS nativo, histéresis de umbral doble, overlay DOM con barra inferior, `SpeechSynthesis` para voz, `ArmTracker` y `ArmPressTracker`, conteo unificado OR+cooldown, PWA manual, SW network-first para HTML, deploy en Vercel, HTTPS local con `@vitejs/plugin-basic-ssl`, delay 450 ms al cambiar de cámara, localStorage defensivo, análisis 3D con `worldLandmarks`, filtro One Euro, validación temporal con histéresis, fatiga por velocidad, Three.js con carga diferida, catálogo mixto, HashRouter, tutorial con demo por cinemática directa, modo manual con reductor puro, tuteo. Documentadas en `DECISIONS.md` (DEC-001 a DEC-039).
+**Correcciones tras la primera prueba en celular (2026-09-23, en árbol de trabajo, sin commit):**
+- **Nivelación con el acelerómetro (DEC-040).** El usuario vio el esqueleto entero inclinado al tomar el celular. Los `worldLandmarks` siguen a la cámara, no al suelo. `src/pose/deviceGravity.ts` endereza el esqueleto con la gravedad del acelerómetro antes de medir. Eso corrige también la inclinación de tronco, el arqueo lumbar y el balanceo del codo, que se medían contra una vertical falsa. El visor 3D dibuja tenues las partes del cuerpo que la cámara no ve.
+- **Sin emojis (DEC-041).** Filtros de grupos musculares solo con texto; logros con íconos propios en `src/ui/icons/AchievementIcon.tsx`.
+- **Editor de rutinas con guardado explícito (DEC-042).** Borrador con "Cancelar" y "Crear rutina" o "Guardar cambios" en una barra fija. Salir con cambios pendientes pide confirmación, incluido el gesto de volver de Android. Se migró a `createHashRouter` para poder usar `useBlocker`.
 
-**Estado de verificación (2026-09-22):**
+**Dependencias nuevas:** `three`, `@types/three` y `react-router-dom`, autorizadas explícitamente por el usuario tras plantearle el costo. Las correcciones del 2026-09-23 no agregaron ninguna.
+
+**Decisiones técnicas tomadas:** React, Vite, TypeScript, `@mediapipe/tasks-vision` (Tasks API), WASM vía CDN jsDelivr, onboarding CSS nativo, histéresis de umbral doble, overlay DOM con barra inferior, `SpeechSynthesis` para voz, `ArmTracker` y `ArmPressTracker`, conteo unificado OR+cooldown, PWA manual, SW network-first para HTML, HTTPS local con `@vitejs/plugin-basic-ssl`, delay 450 ms al cambiar de cámara, localStorage defensivo, análisis 3D con `worldLandmarks`, filtro One Euro, nivelación con acelerómetro, validación temporal con histéresis, fatiga por velocidad, Three.js con carga diferida, catálogo mixto, `createHashRouter`, tutorial con demo por cinemática directa, modo manual con reductor puro, editor con borrador, tuteo, sin emojis. Documentadas en `DECISIONS.md` (DEC-001 a DEC-042). Deploy: Vercel para el repositorio del equipo, Netlify para la copia del usuario.
+
+**Estado de verificación (2026-09-23):**
 - `npm run build`, `npx tsc` y `npm run lint` pasan limpios.
-- `npm run test:motor`: 37 de 37. Cubre técnica correcta a 15, 30 y 60 fps, temblor de 8 y 15 mm, ritmo rápido, tirones, recorridos parciales, fatiga y el modo manual.
-- Recorrido en navegador de escritorio con vista de celular: onboarding, inicio, biblioteca, fichas, demos 3D de press y sentadilla, editor, selector con ficha, tutorial de primera vez, modo manual por repeticiones y por tiempo, y actualización del inicio al guardar.
-- **No se probó con una persona frente a la cámara.** El navegador de prueba no tiene cámara. Según la sección 10, esa es la prueba que vale para todo lo que toca detección. Los umbrales pasan con movimientos sintéticos y falta calibrarlos con movimientos reales.
+- `npm run test:motor`: 50 de 50. Suma 13 pruebas de nivelación: vertical recuperada con inclinación y giro combinados, signo del sensor de Android y de iPhone, lecturas descartadas con el celular acostado o sacudido, y fin de los avisos falsos de arqueo en el press.
+- Recorrido en navegador con vista de celular: editor nuevo (validación de nombre, confirmación al cancelar, guardado, retroceso bloqueado, descarte sin guardar), íconos de logros, filtros sin emojis y fila de sensores en el onboarding.
+- **Primera prueba en celular hecha por el usuario el 2026-09-23**, que originó DEC-040. **No verificado todavía:** la nivelación con los sensores reales de un iPhone y de un Android, y el conteo con movimientos reales.
 
 **Próximo paso:**
-1. Probar en celular con HTTPS y calibrar umbrales de validación, fatiga y filtro con movimientos reales.
-2. Decidir sobre la capa de IA aprendida. Arquitectura conversada: normalización canónica de los 33 puntos 3D, segmentación de fases con modelo temporal, autocodificador para patrón incorrecto y clasificador de ejercicio, en el navegador con TensorFlow.js u ONNX Runtime Web. El cuello de botella es la data. Atajo: etiquetar fases automáticamente con el sistema de umbrales y entrenar con supervisión débil.
-3. Interfaz para emparejar ejercicios en superserie.
-4. Commit de la fase 6, que sigue sin hacerse.
+1. Subir las correcciones del 2026-09-23 y probar en celular, en iPhone y en Android, que el panel 3D muestre "Nivelado" y que el esqueleto quede derecho con el celular inclinado.
+2. Calibrar con movimientos reales los umbrales de validación, fatiga y filtro.
+3. Decidir si integrar este trabajo con el repositorio del equipo.
+4. Decidir sobre la capa de IA aprendida. El cuello de botella es la data.
+5. Interfaz para emparejar ejercicios en superserie.

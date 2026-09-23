@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { HashRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, RouterProvider, createHashRouter } from 'react-router-dom';
 import { CameraView } from './ui/CameraView';
 import { AppShell } from './ui/AppShell';
 import { HomeScreen } from './ui/screens/HomeScreen';
@@ -13,6 +13,37 @@ import { OnboardingFlow } from './ui/Onboarding/OnboardingFlow';
 import { RoutinesProvider } from './routines/RoutinesProvider';
 
 const ONBOARDING_KEY = 'ob_complete_v1';
+
+/**
+ * Rutas de la app.
+ *
+ * Enrutado por fragmento (`#/rutinas`): el documento servido es siempre `index.html`,
+ * así que no hacen falta reglas de reescritura en el hosting y la navegación funciona
+ * con la PWA instalada y sin red (DEC-032).
+ *
+ * Se usa el enrutador de datos (`createHashRouter`) y no el componente `HashRouter`
+ * porque solo el primero permite `useBlocker`, con el que el editor de rutinas pregunta
+ * antes de descartar cambios sin guardar, incluido el gesto de volver de Android (DEC-042).
+ */
+const router = createHashRouter([
+  // Pantallas de tarea que ocupan todo el alto: van fuera del contenedor con barra de
+  // navegación. En medio de una serie o de la edición de una rutina solo distraería.
+  { path: '/entrenar', element: <CameraView /> },
+  { path: '/manual', element: <ManualWorkoutScreen /> },
+  { path: '/rutinas/nueva', element: <RoutineEditorScreen isNew /> },
+  { path: '/rutinas/:routineId', element: <RoutineEditorScreen /> },
+  {
+    element: <AppShell />,
+    children: [
+      { path: '/', element: <HomeScreen /> },
+      { path: '/rutinas', element: <RoutinesScreen /> },
+      { path: '/ejercicios', element: <ExerciseLibraryScreen /> },
+      { path: '/ejercicio/:exerciseId', element: <ExerciseTutorialScreen /> },
+      { path: '/perfil', element: <ProfileScreen /> },
+    ],
+  },
+  { path: '*', element: <Navigate to="/" replace /> },
+]);
 
 function App() {
   const [ready, setReady] = useState(() => {
@@ -28,29 +59,7 @@ function App() {
 
   return (
     <RoutinesProvider>
-      {/* HashRouter y no BrowserRouter: con rutas basadas en fragmento, el documento
-          servido es siempre index.html. Eso evita depender de reglas de reescritura del
-          hosting y mantiene la navegación funcionando con la PWA instalada y sin red
-          (ver DEC-032). */}
-      <HashRouter>
-        <Routes>
-          {/* Las pantallas de entrenamiento ocupan todo el alto: van fuera del contenedor
-              con barra de navegación, que en medio de una serie solo distraería. */}
-          <Route path="/entrenar" element={<CameraView />} />
-          <Route path="/manual" element={<ManualWorkoutScreen />} />
-
-          <Route element={<AppShell />}>
-            <Route path="/" element={<HomeScreen />} />
-            <Route path="/rutinas" element={<RoutinesScreen />} />
-            <Route path="/rutinas/:routineId" element={<RoutineEditorScreen />} />
-            <Route path="/ejercicios" element={<ExerciseLibraryScreen />} />
-            <Route path="/ejercicio/:exerciseId" element={<ExerciseTutorialScreen />} />
-            <Route path="/perfil" element={<ProfileScreen />} />
-          </Route>
-
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </HashRouter>
+      <RouterProvider router={router} />
     </RoutinesProvider>
   );
 }

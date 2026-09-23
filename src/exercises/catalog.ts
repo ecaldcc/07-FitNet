@@ -36,18 +36,18 @@ export interface ExerciseDefinition {
   cues: string;
 }
 
-export const MUSCLE_GROUPS: { id: MuscleGroup; label: string; emoji: string }[] = [
-  { id: 'pecho',          label: 'Pecho',          emoji: '🫁' },
-  { id: 'espalda',        label: 'Espalda',        emoji: '🔙' },
-  { id: 'hombros',        label: 'Hombros',        emoji: '🤸' },
-  { id: 'biceps',         label: 'Bíceps',         emoji: '💪' },
-  { id: 'triceps',        label: 'Tríceps',        emoji: '🦾' },
-  { id: 'cuadriceps',     label: 'Cuádriceps',     emoji: '🦵' },
-  { id: 'isquiotibiales', label: 'Isquiotibiales', emoji: '🦿' },
-  { id: 'gluteos',        label: 'Glúteos',        emoji: '🍑' },
-  { id: 'pantorrillas',   label: 'Pantorrillas',   emoji: '🦶' },
-  { id: 'core',           label: 'Core',           emoji: '🎯' },
-  { id: 'cardio',         label: 'Cardio',         emoji: '❤️' },
+export const MUSCLE_GROUPS: { id: MuscleGroup; label: string }[] = [
+  { id: 'pecho',          label: 'Pecho' },
+  { id: 'espalda',        label: 'Espalda' },
+  { id: 'hombros',        label: 'Hombros' },
+  { id: 'biceps',         label: 'Bíceps' },
+  { id: 'triceps',        label: 'Tríceps' },
+  { id: 'cuadriceps',     label: 'Cuádriceps' },
+  { id: 'isquiotibiales', label: 'Isquiotibiales' },
+  { id: 'gluteos',        label: 'Glúteos' },
+  { id: 'pantorrillas',   label: 'Pantorrillas' },
+  { id: 'core',           label: 'Core' },
+  { id: 'cardio',         label: 'Cardio' },
 ];
 
 export const DIFFICULTY_LABELS: Record<Difficulty, string> = {

@@ -220,6 +220,9 @@ sigue siendo correcto hasta el detector; de ahí en adelante se bifurca.
                 ▼
            pose/landmarkFilter.ts   filtro One Euro: quita el temblor (DEC-036)
                 │
+                ▼
+           pose/deviceGravity.ts    acelerómetro: endereza a la vertical real (DEC-040)
+                │
                 ├──► geometry/vectors3d.ts
                 │    calculateAngle3D, getBodyOrientation,
                 │    getTorsoInclination, asymmetryRatio
@@ -291,12 +294,28 @@ Las sesiones se registran con `recordSession` del contexto, que guarda y actuali
 estado en el mismo instante. Todas las rutas, incluidas las de entrenamiento, viven
 dentro del proveedor.
 
+### `src/ui/screens/RoutineEditorScreen.tsx`
+Edita un borrador y solo lo persiste con "Crear rutina" o "Guardar cambios" (DEC-042).
+Salir con cambios pendientes, por cualquier vía, pide confirmación con `useBlocker`. Eso
+obligó a usar el enrutador de datos (`createHashRouter` en `App.tsx`) en lugar del
+componente `HashRouter`. El editor ocupa toda la pantalla, sin barra de navegación, con
+las acciones fijas abajo.
+
 ### `src/routines/manualWorkout.ts`
 Reductor puro del modo manual: series, rondas de rest-pause y dropset, descansos y
 temporizador. El tiempo llega en cada acción y nunca se lee adentro, lo que lo vuelve
 determinista y comprobable sin relojes reales (DEC-037). La pantalla
 `ui/screens/ManualWorkoutScreen.tsx` solo le agrega relojes, voz, vibración y el bloqueo
 de pantalla apagada.
+
+### `src/pose/deviceGravity.ts`
+Alinea el esqueleto con la gravedad real (DEC-040). Los `worldLandmarks` siguen a la
+cámara, no al suelo: con el celular inclinado, todo el cuerpo aparece inclinado y las
+medidas contra la vertical salen corridas. El acelerómetro da la gravedad en ejes de
+pantalla; se pasa a ejes de la cámara, distintos para la trasera y la frontal, y se gira
+el esqueleto con la rotación mínima que la lleva al eje vertical. El signo de la lectura
+difiere entre Android e iOS y se resuelve sin detectar el navegador. En iOS el permiso se
+pide desde un toque: en el onboarding, al cerrar el tutorial o con el botón "Nivelar".
 
 ### `src/pose/landmarkFilter.ts`
 Filtro One Euro por coordenada de cada landmark (DEC-036). Se aplica una sola vez en la
@@ -337,6 +356,10 @@ Ancla el punto más bajo de los pies visibles al suelo de la escena: como `world
 tiene el origen en la cadera, sin esto en una sentadilla subirían los pies en vez de bajar
 la cadera.
 
+Separa lo que la cámara ve de lo que MediaPipe estima (DEC-040). Los huesos con algún
+extremo de visibilidad menor a 0.5 se dibujan tenues y sin articulaciones, en un segundo
+`LineSegments`. Antes, las piernas fuera del cuadro se dibujaban como si se midieran.
+
 ## Decisiones de diseño nuevas
 
 ### Los trackers ya no reciben el tiempo implícitamente
@@ -364,4 +387,5 @@ resultado del ejercicio provoca render, porque es lo único que el usuario ve ca
 | Capa de IA aprendida | Conversada y no construida. Reemplazaría los umbrales por segmentación de fases con un modelo temporal sobre los 33 puntos normalizados. Las demos por cinemática directa y el banco de pruebas son una base útil para generar y validar datos |
 | Ejercicios con análisis | Siguen siendo tres. Los otros 57 se ejecutan en el modo manual, sin análisis de técnica |
 | Superserie | La app indica alternar ejercicios pero no los encadena, y el editor no permite elegir el ejercicio pareado |
+| Nivelación en dispositivos reales | El banco de pruebas valida la matemática y el signo de Android e iOS con un modelo, pero falta confirmar con los sensores de un iPhone y de un Android |
 | Tamaño del paquete | El fragmento principal pasa de 500 kB por el contenido de las fichas y las pantallas nuevas. Se puede partir por ruta con `React.lazy` si la carga inicial en celular resulta lenta |

@@ -1,9 +1,16 @@
+import { requestMotionPermission } from '../../pose/deviceGravity';
+
 interface Props {
   onNext: () => void;
 }
 
 export function PermissionsScreen({ onNext }: Props) {
   const handleContinue = async () => {
+    // Sensores de movimiento primero: iOS solo concede este permiso si se pide directo
+    // desde el toque, y la espera del permiso de cámara consumiría ese toque (DEC-040).
+    // Se lanza sin esperar su resultado; en Android resuelve al instante sin preguntar.
+    const motion = requestMotionPermission();
+
     // Solicita permiso de cámara con context claro para el navegador
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
@@ -18,6 +25,9 @@ export function PermissionsScreen({ onNext }: Props) {
       await Notification.requestPermission();
     }
 
+    // El resultado del sensor no condiciona nada: sin él, la app mide contra la vertical
+    // de la cámara como antes.
+    await motion;
     onNext();
   };
 
@@ -48,6 +58,24 @@ export function PermissionsScreen({ onNext }: Props) {
               <span className="ob-badge req">Requerida</span>
             </h3>
             <p>Necesaria para detectar tu cuerpo y calcular los ángulos articulares en tiempo real.</p>
+          </div>
+        </div>
+
+        {/* Sensores de movimiento */}
+        <div className="ob-perm-card">
+          <div className="ob-perm-ico level">
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <rect x="2" y="8.5" width="22" height="9" rx="4.5" stroke="#FF9F0A" strokeWidth="2" />
+              <circle cx="13" cy="13" r="2" fill="#FF9F0A" />
+              <path d="M9.5 8.5v9M16.5 8.5v9" stroke="#FF9F0A" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </div>
+          <div className="ob-perm-info">
+            <h3>
+              Sensores de movimiento
+              <span className="ob-badge opt">Opcional</span>
+            </h3>
+            <p>Para saber si el celular está inclinado y medir tu postura contra la vertical real.</p>
           </div>
         </div>
 

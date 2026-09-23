@@ -236,6 +236,7 @@
 }
 .ob-perm-ico.cam  { background: rgba(48, 209, 88, 0.12); }
 .ob-perm-ico.bell { background: rgba(52, 170, 220, 0.12); }
+.ob-perm-ico.level { background: rgba(255, 159, 10, 0.12); }
 .ob-perm-info { flex: 1; }
 .ob-perm-info h3 {
   font-size: 16px;

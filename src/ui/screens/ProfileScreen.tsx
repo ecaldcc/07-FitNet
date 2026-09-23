@@ -6,6 +6,7 @@ import {
   type ExperienceLevel, type GoalType, type UserProfile,
 } from '../../profile/profile';
 import { getExercise } from '../../exercises/catalog';
+import { AchievementIcon } from '../icons/AchievementIcon';
 
 const EXPERIENCE_LABELS: Record<ExperienceLevel, string> = {
   principiante: 'Principiante',
@@ -204,7 +205,7 @@ export function ProfileScreen() {
         <ul className="achievement-grid">
           {achievements.map(a => (
             <li key={a.id} className={`achievement${a.unlocked ? ' unlocked' : ''}`}>
-              <span className="achievement-emoji">{a.emoji}</span>
+              <span className="achievement-icon"><AchievementIcon name={a.icon} /></span>
               <span className="achievement-name">{a.name}</span>
               <span className="achievement-desc">{a.description}</span>
               {!a.unlocked && (

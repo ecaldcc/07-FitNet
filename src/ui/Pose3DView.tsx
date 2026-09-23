@@ -88,14 +88,25 @@ export function Pose3DView({
     const group = new THREE.Group();
     scene.add(group);
 
-    // ── Huesos: un único LineSegments cuyos vértices se reescriben cada cuadro ──
+    // ── Huesos: dos LineSegments cuyos vértices se reescriben cada cuadro ──
+    // Uno para lo que la cámara ve y otro, tenue, para lo que MediaPipe estima sin verlo.
+    // Cuando una parte del cuerpo sale del cuadro, el modelo igual inventa su posición;
+    // dibujarla igual que lo visible hacía creer que eso se estaba midiendo (DEC-040).
     const connections = PoseLandmarker.POSE_CONNECTIONS;
-    const boneGeometry = new THREE.BufferGeometry();
-    const bonePositions = new Float32Array(connections.length * 2 * 3);
-    boneGeometry.setAttribute('position', new THREE.BufferAttribute(bonePositions, 3));
+    const makeBones = (material: THREE.LineBasicMaterial) => {
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(connections.length * 2 * 3);
+      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const lines = new THREE.LineSegments(geometry, material);
+      group.add(lines);
+      return { geometry, positions, lines };
+    };
     const boneMaterial = new THREE.LineBasicMaterial({ color: 0x30d158 });
-    const bones = new THREE.LineSegments(boneGeometry, boneMaterial);
-    group.add(bones);
+    const guessMaterial = new THREE.LineBasicMaterial({
+      color: 0x8a8f98, transparent: true, opacity: 0.22,
+    });
+    const seenBones = makeBones(boneMaterial);
+    const guessedBones = makeBones(guessMaterial);
 
     // ── Articulaciones: InstancedMesh para dibujar 33 esferas en una sola llamada ──
     const jointGeometry = new THREE.SphereGeometry(0.045, 10, 10);
@@ -198,23 +209,33 @@ export function Pose3DView({
           );
         }
 
+        // Un hueso cuenta como visto solo si la cámara ve sus dos extremos.
+        let seenCount = 0;
+        let guessedCount = 0;
         for (let c = 0; c < connections.length; c++) {
           const { start, end } = connections[c];
-          const o = c * 6;
-          bonePositions[o + 0] = points[start].x;
-          bonePositions[o + 1] = points[start].y;
-          bonePositions[o + 2] = points[start].z;
-          bonePositions[o + 3] = points[end].x;
-          bonePositions[o + 4] = points[end].y;
-          bonePositions[o + 5] = points[end].z;
+          const seen = isSeen(world[start]) && isSeen(world[end]);
+          const target = seen ? seenBones.positions : guessedBones.positions;
+          const o = (seen ? seenCount++ : guessedCount++) * 6;
+          target[o + 0] = points[start].x;
+          target[o + 1] = points[start].y;
+          target[o + 2] = points[start].z;
+          target[o + 3] = points[end].x;
+          target[o + 4] = points[end].y;
+          target[o + 5] = points[end].z;
         }
-        boneGeometry.attributes.position.needsUpdate = true;
-        boneGeometry.computeBoundingSphere();
+        for (const [bones, count] of [[seenBones, seenCount], [guessedBones, guessedCount]] as const) {
+          bones.geometry.setDrawRange(0, count * 2);
+          bones.geometry.attributes.position.needsUpdate = true;
+          bones.geometry.computeBoundingSphere();
+        }
 
         for (let i = 0; i < JOINT_COUNT; i++) {
           dummy.position.copy(points[i]);
-          // Las articulaciones que se evalúan se dibujan más grandes que el resto.
-          dummy.scale.setScalar(KEY_JOINTS.has(i) ? 1.5 : 0.85);
+          // Las articulaciones estimadas no se dibujan: una esfera sólida afirma una
+          // posición medida que no existe. Las que se evalúan se dibujan más grandes.
+          const scale = !isSeen(world[i]) ? 0 : KEY_JOINTS.has(i) ? 1.5 : 0.85;
+          dummy.scale.setScalar(scale);
           dummy.updateMatrix();
           joints.setMatrixAt(i, dummy.matrix);
         }
@@ -246,8 +267,10 @@ export function Pose3DView({
 
       // WebGL no libera memoria de GPU con el recolector de basura de JS:
       // cada geometría, material y el contexto deben descartarse a mano.
-      boneGeometry.dispose();
+      seenBones.geometry.dispose();
+      guessedBones.geometry.dispose();
       boneMaterial.dispose();
+      guessMaterial.dispose();
       jointGeometry.dispose();
       jointMaterial.dispose();
       joints.dispose();
@@ -265,6 +288,13 @@ export function Pose3DView({
   }), []);
 
   return <div ref={mountRef} className={className} />;
+}
+
+/** Mismo umbral de visibilidad que usan los trackers para decidir si un punto cuenta. */
+const MIN_VISIBILITY = 0.5;
+
+function isSeen(p: Landmark): boolean {
+  return (p.visibility ?? 0) >= MIN_VISIBILITY;
 }
 
 /** Articulaciones que participan en algún cálculo angular; se resaltan en el visor. */

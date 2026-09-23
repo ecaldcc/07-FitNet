@@ -1,38 +1,25 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRoutines } from '../../routines/context';
-import { createEmptyRoutine } from '../../routines/storage';
 import { WEEKDAY_SHORT, type WeekDay } from '../../routines/types';
 import {
-  DIFFICULTY_COLORS, DIFFICULTY_LABELS, getMuscleLabel, type Difficulty,
+  DIFFICULTY_COLORS, DIFFICULTY_LABELS, getMuscleLabel,
 } from '../../exercises/catalog';
 
 export function RoutinesScreen() {
   const navigate = useNavigate();
-  const { routines, activeRoutine, setActive, deleteRoutine, upsertRoutine, storageAvailable } = useRoutines();
+  const { routines, activeRoutine, setActive, deleteRoutine, storageAvailable } = useRoutines();
 
-  const [creating, setCreating] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newDifficulty, setNewDifficulty] = useState<Difficulty>('medio');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-
-  function handleCreate() {
-    const name = newName.trim();
-    if (!name) return;
-
-    const routine = createEmptyRoutine(name, newDifficulty);
-    upsertRoutine(routine);
-    setCreating(false);
-    setNewName('');
-    navigate(`/rutinas/${routine.id}`);
-  }
 
   return (
     <div className="screen">
       <header className="screen-header">
         <h1 className="screen-title">Rutinas</h1>
-        <button className="primary-btn compact" onClick={() => setCreating(v => !v)}>
-          {creating ? 'Cancelar' : 'Nueva'}
+        {/* El nombre, la dificultad y los días se eligen en el editor, que guarda recién
+            al confirmar (DEC-042). Crear desde aquí ya no persiste nada por adelantado. */}
+        <button className="primary-btn compact" onClick={() => navigate('/rutinas/nueva')}>
+          Nueva rutina
         </button>
       </header>
 
@@ -40,41 +27,6 @@ export function RoutinesScreen() {
         <p className="warning-banner">
           El navegador está bloqueando el almacenamiento. Los cambios no se van a guardar.
         </p>
-      )}
-
-      {creating && (
-        <section className="form-card">
-          <label className="field">
-            <span>Nombre de la rutina</span>
-            <input
-              type="text"
-              value={newName}
-              onChange={e => setNewName(e.target.value)}
-              placeholder="Por ejemplo: Fuerza 4 días"
-              autoFocus
-            />
-          </label>
-
-          <div className="field">
-            <span>Dificultad</span>
-            <div className="difficulty-picker">
-              {(['bajo', 'medio', 'alto'] as Difficulty[]).map(d => (
-                <button
-                  key={d}
-                  className={`difficulty-option${newDifficulty === d ? ' selected' : ''}`}
-                  style={newDifficulty === d ? { background: DIFFICULTY_COLORS[d] } : undefined}
-                  onClick={() => setNewDifficulty(d)}
-                >
-                  {DIFFICULTY_LABELS[d]}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <button className="primary-btn" onClick={handleCreate} disabled={!newName.trim()}>
-            Crear y agregar días
-          </button>
-        </section>
       )}
 
       <ul className="routine-list">

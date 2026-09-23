@@ -346,6 +346,7 @@ standing     → voz dice solo el número de rep
 **Fecha:** 2026-09-19  
 **Contexto:** La aplicación pasó de una sola pantalla de cámara a cinco vistas: inicio, rutinas, editor de rutina, entrenamiento y perfil. Hacía falta navegación y estado compartido.  
 **Decisión de enrutado:** `HashRouter` de react-router-dom, no `BrowserRouter`.  
+**Actualización 2026-09-23:** Se migró de `HashRouter` a `createHashRouter`, que mantiene el enrutado por fragmento pero habilita `useBlocker`. Ver DEC-042.  
 **Razón:** Con rutas basadas en fragmento, el documento servido es siempre `index.html`. Eso evita depender de reglas de reescritura del hosting, que el proyecto no tiene configuradas, y mantiene la navegación funcionando con la PWA instalada y sin red. Con `BrowserRouter`, abrir directamente una ruta profunda devolvería 404 salvo que se agregue configuración en Vercel, y el service worker network-first de DEC-025 tendría que resolver el caso sin conexión.  
 **Estructura de rutas:** La pantalla de entrenamiento queda fuera del contenedor con barra de navegación, porque ocupa todo el alto y no debe compartir espacio con la barra.  
 **Decisión de estado:** Contexto de React, sin librería de estado. El árbol es chico y el dato cabe entero en memoria. Cada escritura persiste de inmediato en `localStorage`, por lo que no hay guardado explícito ni riesgo de perder cambios al cerrar la aplicación.  
@@ -436,3 +437,41 @@ standing     → voz dice solo el número de rep
 **Contexto:** La app original usa "tú" ("Apunta tu cámara", "Baja un poco más", "Asegúrate"), y el usuario también escribe en "tú". En la fase 6 se introdujo voseo ("Bajá", "Pegá", "Tenés") en todos los textos nuevos, y el onboarding original ya tenía un caso aislado ("Posicioná... empezá").  
 **Decisión:** Tuteo en toda la interfaz. Se corrigieron 68 casos con un mapa exacto de formas verbales, aplicado solo sobre palabras completas y verificado después con un escáner que reconoce tildes.  
 **Mensajes de error de cámara:** El navegador los entrega en inglés ("Permission denied"). Se traducen a mensajes accionables en español según el tipo de error, por la restricción 6 del proyecto.
+
+---
+
+## DEC-040 · Nivelación con el acelerómetro y partes del cuerpo estimadas
+**Fecha:** 2026-09-23  
+**Contexto:** En la primera prueba en celular, el usuario reportó que el modelo 3D lo mostraba inclinado entero, piernas incluidas, cuando solo se había inclinado de la cadera para arriba para tomar el teléfono.  
+**Causa, primera parte:** Los `worldLandmarks` de MediaPipe están alineados con la cámara, no con el suelo. MediaPipe no tiene acceso a los sensores del teléfono, así que su "abajo" es el borde inferior de la imagen. Con el celular inclinado, el esqueleto entero aparece inclinado. No es solo visual: la inclinación del tronco en sentadilla, el arqueo en press y el balanceo del codo en curl se miden contra esa vertical falsa. El banco de pruebas confirma que con el celular inclinado 32° el press daba avisos de arqueo sin que existiera ninguno.  
+**Causa, segunda parte:** Cuando una parte del cuerpo sale del cuadro, MediaPipe igual estima su posición, con baja visibilidad. El visor dibujaba esas partes igual que las vistas, y hacía creer que se estaban midiendo.  
+**Alternativas consideradas:**  
+(a) Estimar la vertical desde el cuerpo, asumiendo que las piernas están rectas — falla justo en la sentadilla, donde la cadera queda detrás de los tobillos.  
+(b) Estimar el plano del suelo con los talones y las puntas de los pies — solo sirve con los pies en cuadro, que no es el caso en curl ni en press.  
+(c) Ángulos de orientación del dispositivo (`deviceorientation`) — entran en bloqueo de cardán con el celular en vertical, que es justo como se usa la app, y no pueden leer una inclinación lateral tipo volante.  
+(d) Vector de gravedad del acelerómetro (`devicemotion`).  
+**Decisión:** Opción (d), en `src/pose/deviceGravity.ts`. La gravedad medida en ejes de pantalla se pasa a los ejes de la cámara, distintos para la trasera y la frontal, y el esqueleto se gira con la rotación mínima que lleva ese "abajo" al eje vertical. Se aplica una sola vez, después del filtro de DEC-036 y antes de los trackers y del visor. Los ángulos articulares no cambian; lo que se corrige son las medidas contra la vertical.  
+**Signo de la lectura:** Android reporta la reacción del apoyo, que apunta hacia arriba, e iOS reporta la gravedad, hacia abajo. En lugar de detectar el navegador, se elige el signo que hace apuntar "abajo" hacia el borde inferior de la pantalla, lo cual siempre es cierto con el celular en vertical.  
+**Salvaguardas:** Se descartan las lecturas con el teléfono en movimiento brusco y con el teléfono casi horizontal. Tampoco se corrigen inclinaciones de más de 60°. Sin sensor, la app mide como antes.  
+**Permiso en iOS:** Safari exige pedirlo desde un toque, antes de cualquier espera. Se pide en el onboarding, antes que la cámara; al cerrar el tutorial en la vista de cámara; y con un botón "Nivelar" en el panel 3D si hace falta. En Android no requiere permiso. El panel muestra "Nivelado" cuando la corrección está activa.  
+**Partes estimadas:** El visor dibuja tenues y sin articulaciones los huesos cuyos extremos tienen visibilidad menor a 0.5, el mismo umbral que usan los trackers.  
+**Verificado:** 13 pruebas nuevas en el banco. Recupera la vertical con inclinaciones de hasta 30° combinadas con giro, interpreta bien el signo de Android y de iPhone, y elimina los avisos falsos de arqueo en el press. **No verificado con sensores reales:** falta confirmar en un iPhone y en un Android que el signo y los ejes se comportan como en el modelo.
+
+---
+
+## DEC-041 · Íconos en lugar de emojis
+**Fecha:** 2026-09-23  
+**Contexto:** El usuario pidió no usar emojis: se ven distintos en cada sistema operativo y no encajan con el resto de la interfaz. Había 11 en los filtros de grupos musculares y 8 en los logros.  
+**Decisión:** Los filtros de grupos musculares quedan solo con texto, que es lo más limpio para un filtro. Los logros usan íconos propios en `src/ui/icons/AchievementIcon.tsx`, dibujados con el mismo trazo que la barra de navegación. No se agregó ninguna librería de íconos.  
+**Verificado:** El escáner de caracteres pictográficos da cero en todo `src/`.
+
+---
+
+## DEC-042 · Editor de rutinas con guardado explícito
+**Fecha:** 2026-09-23  
+**Contexto:** El usuario reportó que el editor de rutinas no tenía botón de guardar. Cada cambio se guardaba al instante, sin que el usuario lo supiera, y no había forma de arrepentirse. Crear una rutina además la guardaba vacía antes de agregarle nada.  
+**Decisión:** El editor trabaja sobre un borrador, y solo "Crear rutina" o "Guardar cambios" lo persisten. Una barra fija abajo tiene "Cancelar" y la acción principal, siempre a la vista mientras se agregan ejercicios. Sin cambios, la acción principal dice "Listo". Crear una rutina ya no guarda nada hasta confirmar, y el nombre es obligatorio.  
+**Salir con cambios pendientes:** Aparece una confirmación con "Guardar y salir", "Descartar" y "Seguir editando". Cubre el botón de volver, "Cancelar" y el gesto de volver de Android. Cerrar la pestaña con cambios pendientes también avisa.  
+**Cambio de enrutador:** Para bloquear la navegación hace falta `useBlocker`, que solo existe con el enrutador de datos de React Router. Se migró de `HashRouter` a `createHashRouter`. El enrutado por fragmento de DEC-032 no cambia.  
+**Editor a pantalla completa:** El editor sale del contenedor con barra de navegación, igual que las pantallas de entrenamiento. Dos barras apiladas abajo no dejan espacio en un celular, y editar es una tarea que se termina o se cancela.  
+**Verificado en navegador:** Guardar sin nombre muestra el error. Cancelar con cambios pide confirmación, y "Seguir editando" conserva el borrador. Crear persiste la rutina y vuelve a la lista sin preguntar. El retroceso del historial queda bloqueado con cambios pendientes. Descartar no guarda nada.

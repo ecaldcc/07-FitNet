@@ -1,6 +1,9 @@
 import { readJSON, writeJSON } from '../storage/localStore';
 import { createId, type WorkoutSession } from '../routines/types';
 
+export type AchievementIconName =
+  | 'flag' | 'flame' | 'trophy' | 'repeat' | 'bolt' | 'calendar' | 'calendar-check' | 'timer';
+
 /**
  * Perfil de usuario, objetivos y logros (ver DEC-031).
  *
@@ -210,7 +213,8 @@ export interface Achievement {
   id: string;
   name: string;
   description: string;
-  emoji: string;
+  /** Ícono del logro; se dibuja con `AchievementIcon`. */
+  icon: AchievementIconName;
   unlocked: boolean;
   /** Progreso hacia el desbloqueo, 0–100. */
   progress: number;
@@ -222,22 +226,22 @@ export interface Achievement {
  * contradiga lo que muestra el historial.
  */
 export function computeAchievements(stats: ProgressStats): Achievement[] {
-  const defs: { id: string; name: string; description: string; emoji: string; current: number; target: number }[] = [
-    { id: 'first',      name: 'Primer paso',     description: 'Completa tu primera sesión',        emoji: '🎯', current: stats.totalSessions, target: 1 },
-    { id: 'ten',        name: 'Constancia',      description: 'Completa 10 sesiones',              emoji: '🔥', current: stats.totalSessions, target: 10 },
-    { id: 'fifty',      name: 'Veterano',        description: 'Completa 50 sesiones',              emoji: '🏆', current: stats.totalSessions, target: 50 },
-    { id: 'reps100',    name: 'Cien repeticiones', description: 'Acumula 100 repeticiones',        emoji: '💯', current: stats.totalReps, target: 100 },
-    { id: 'reps1000',   name: 'Mil repeticiones', description: 'Acumula 1000 repeticiones',        emoji: '⚡', current: stats.totalReps, target: 1000 },
-    { id: 'streak3',    name: 'Tres seguidos',   description: 'Entrena 3 días seguidos',           emoji: '📅', current: stats.longestStreak, target: 3 },
-    { id: 'streak7',    name: 'Semana completa', description: 'Entrena 7 días seguidos',           emoji: '🗓️', current: stats.longestStreak, target: 7 },
-    { id: 'hour',       name: 'Una hora',        description: 'Acumula 60 minutos de entrenamiento', emoji: '⏱️', current: stats.totalMinutes, target: 60 },
+  const defs: { id: string; name: string; description: string; icon: AchievementIconName; current: number; target: number }[] = [
+    { id: 'first',      name: 'Primer paso',     description: 'Completa tu primera sesión',        icon: 'flag', current: stats.totalSessions, target: 1 },
+    { id: 'ten',        name: 'Constancia',      description: 'Completa 10 sesiones',              icon: 'flame', current: stats.totalSessions, target: 10 },
+    { id: 'fifty',      name: 'Veterano',        description: 'Completa 50 sesiones',              icon: 'trophy', current: stats.totalSessions, target: 50 },
+    { id: 'reps100',    name: 'Cien repeticiones', description: 'Acumula 100 repeticiones',        icon: 'repeat', current: stats.totalReps, target: 100 },
+    { id: 'reps1000',   name: 'Mil repeticiones', description: 'Acumula 1000 repeticiones',        icon: 'bolt', current: stats.totalReps, target: 1000 },
+    { id: 'streak3',    name: 'Tres seguidos',   description: 'Entrena 3 días seguidos',           icon: 'calendar', current: stats.longestStreak, target: 3 },
+    { id: 'streak7',    name: 'Semana completa', description: 'Entrena 7 días seguidos',           icon: 'calendar-check', current: stats.longestStreak, target: 7 },
+    { id: 'hour',       name: 'Una hora',        description: 'Acumula 60 minutos de entrenamiento', icon: 'timer', current: stats.totalMinutes, target: 60 },
   ];
 
   return defs.map(d => ({
     id: d.id,
     name: d.name,
     description: d.description,
-    emoji: d.emoji,
+    icon: d.icon,
     unlocked: d.current >= d.target,
     progress: Math.min(100, Math.round((d.current / d.target) * 100)),
   }));
