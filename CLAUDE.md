@@ -200,7 +200,7 @@ Lo que se entrega en Canvas el 22/05 y se presenta el 23/05.
 
 **Lo entregado en el curso (sin cambios):** los 3 ejercicios operativos, PWA instalable, deploy en Vercel y la documentación de Canvas en `docs/`.
 
-**Repositorios:** `origin` es `github.com/ecaldcc/entrenador-personal-ia`, la copia personal del usuario, desplegada en Netlify desde `main`. `upstream` es `github.com/govandoh/entrenador-personal-ia`, el repositorio del equipo, que avanzó en paralelo con otra dirección técnica (monorepo con pnpm, Supabase, pruebas de referencia con grabaciones) y con una numeración de decisiones que choca con la de este repositorio a partir de DEC-026. Integrar ambos sigue pendiente y es una decisión del usuario.
+**Repositorios:** `origin` es `github.com/ecaldcc/07-FitNet`, la copia personal del usuario, desplegada en Netlify desde `main`. `upstream` es `github.com/govandoh/entrenador-personal-ia`, el repositorio del equipo, que avanzó en paralelo con otra dirección técnica (monorepo con pnpm, Supabase, pruebas de referencia con grabaciones) y con una numeración de decisiones que choca con la de este repositorio a partir de DEC-026. Integrar ambos sigue pendiente y es una decisión del usuario.
 
 **Lo agregado en la fase 6 (en `main` desde el commit `d456e95`):**
 - **Análisis 3D real (DEC-026).** El motor pasó de `landmarks` (proyección de pantalla) a `worldLandmarks` (coordenadas métricas 3D), que MediaPipe ya entregaba y la app descartaba. `src/geometry/vectors3d.ts` con `calculateAngle3D` por producto punto, orientación corporal, inclinación de tronco y asimetría.
